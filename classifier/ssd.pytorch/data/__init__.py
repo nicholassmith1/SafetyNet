@@ -1,10 +1,15 @@
 from .voc0712 import VOCDetection, VOCAnnotationTransform, VOC_CLASSES, VOC_ROOT
 
 from .coco import COCODetection, COCOAnnotationTransform, COCO_CLASSES, COCO_ROOT, get_label_map
+
+from .okutama import OkutamaDetection, OkutamaAnnotationTransform, OKUTAMA_CLASSES, OKUTAMA_ROOT
+
 from .config import *
 import torch
 import cv2
 import numpy as np
+
+from pdb import set_trace as bp
 
 def detection_collate(batch):
     """Custom collate fn for dealing with batches of images that have a different
@@ -21,10 +26,14 @@ def detection_collate(batch):
     """
     targets = []
     imgs = []
+    imgs_orig = []
+    trgs_orig = []
     for sample in batch:
         imgs.append(sample[0])
         targets.append(torch.FloatTensor(sample[1]))
-    return torch.stack(imgs, 0), targets
+        imgs_orig.append(sample[2])
+        trgs_orig.append(sample[3])
+    return torch.stack(imgs, 0), targets, imgs_orig, trgs_orig
 
 
 def base_transform(image, size, mean):

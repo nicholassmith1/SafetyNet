@@ -113,6 +113,15 @@ class VOCDetection(data.Dataset):
             for line in open(osp.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
                 self.ids.append((rootpath, line.strip()))
 
+        # def _transform(index):
+        #     img_id = self.ids[index]
+        #     target = ET.parse(self._annopath % img_id).getroot()
+        #     img = cv2.imread(self._imgpath % img_id)
+        #     height, width, channels = img.shape
+        #     return self.target_transform(target, width, height)
+
+        # bp()
+
     def __getitem__(self, index):
         im, gt, h, w = self.pull_item(index)
 
