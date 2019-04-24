@@ -3,13 +3,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from helpers import (rotationMatrixToEulerAngles)
 
-def calc_drone_pos_delta(intr, frame_prev, frame_cur, bounding_boxes):
-    """
-    @return (R, t)      the translation and rotation matrices describing
-                        the change in position from frame_prev to frame_cur.
-    """
-    # Get key features
-    #sift = cv2.xfeatures2d.SIFT_create()
+
+def get_matching_points(frame_prev, frame_cur):
+#sift = cv2.xfeatures2d.SIFT_create()
     #surf = cv2.xfeatures2d.SURF_create()
     orb = cv2.ORB_create(nfeatures=1500)
 
@@ -25,7 +21,7 @@ def calc_drone_pos_delta(intr, frame_prev, frame_cur, bounding_boxes):
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
 
     # Match descriptors. Hopefully improve RANSAC performance
-    matches = bf.match(desc_prev,desc_cur)
+    matches = bf.match(desc_prev, desc_cur)
 
     # # FLANN parameters
     # FLANN_INDEX_KDTREE = 0
@@ -41,17 +37,7 @@ def calc_drone_pos_delta(intr, frame_prev, frame_cur, bounding_boxes):
     kpc = np.empty((len(matches), 2))
     kpp = np.empty((len(matches), 2))
 
-    # Debug
-    if False:
-        # print(matches[-1:])
-        # kpc[0, 0] = kp_cur[matches[-1:][0].trainIdx].pt[0]
-        # kpc[0, 1] = kp_cur[matches[-1:][0].trainIdx].pt[1]
-        # kpp[0, 0] = kp_prev[matches[-1:][0].queryIdx].pt[0]
-        # kpp[0, 1] = kp_prev[matches[-1:][0].queryIdx].pt[1]
-
-        # print('{} {}'.format(kpc[0], kpp[0]))
-        img = cv2.drawMatches(frame_prev, kp_prev, frame_cur, kp_cur, matches, None)
-        plt.imshow(img),plt.show()
+    matches = matches[:10]
 
     for i in range(len(matches)):
         # print('-----')
@@ -72,6 +58,32 @@ def calc_drone_pos_delta(intr, frame_prev, frame_cur, bounding_boxes):
         kpp[i, 0] = kp_prev[matches[i].queryIdx].pt[0]
         kpp[i, 1] = kp_prev[matches[i].queryIdx].pt[1]
 
+    # Debug
+    if False:
+        # print(matches[-1:])
+        # kpc[0, 0] = kp_cur[matches[-1:][0].trainIdx].pt[0]
+        # kpc[0, 1] = kp_cur[matches[-1:][0].trainIdx].pt[1]
+        # kpp[0, 0] = kp_prev[matches[-1:][0].queryIdx].pt[0]
+        # kpp[0, 1] = kp_prev[matches[-1:][0].queryIdx].pt[1]
+        # frame_prev = cv2.resize(frame_prev, None, fx=0.5, fy=0.5)
+        # frame_cur = cv2.resize(frame_cur, None, fx=0.5, fy=0.5)
+
+        print(matches[0])
+        print('{} {}'.format(kpp[0], kpc[0]))
+        img = cv2.drawMatches(frame_prev, kp_prev, frame_cur, kp_cur, matches, None)
+        plt.imshow(img),plt.show()
+
+    return kpp, kpc
+
+def calc_drone_pos_delta(intr, frame_prev, frame_cur, bounding_boxes):
+    """
+    @return (R, t)      the translation and rotation matrices describing
+                        the change in position from frame_prev to frame_cur.
+    """
+
+    # Get key features
+    kpp, kpc = get_matching_points(frame_prev, frame_cur)
+
     
 
     # Calculate the essential matrix. Pose *should* be p2 to p1, in
@@ -85,8 +97,8 @@ def calc_drone_pos_delta(intr, frame_prev, frame_cur, bounding_boxes):
 
     print('valid: {} / {}'.format(retval, len(kpc)))
     # print(R)
-    # print(rotationMatrixToEulerAngles(R))
-    # print(t)
+    print(rotationMatrixToEulerAngles(R))
+    print(t)
 
     # # debug
     # if (retval / len(kpc)) < 0.5:
