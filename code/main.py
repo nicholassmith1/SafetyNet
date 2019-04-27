@@ -64,7 +64,8 @@ def process_frame(intr, dt, frame_cur, frame_prev, bounding_boxes=None, out=None
     if out is not None:
         frame = frame_cur
         for bb in bounding_boxes:
-            cv2.rectangle(frame,(bb[0],bb[1]), (bb[0] + bb[2], bb[1] + bb[3]), (0,255,0), 3)
+            frame = cv2.rectangle(frame,(bb[0],bb[1]), (bb[0] + bb[2], bb[1] + bb[3]), (0,255,0), 3)
+            # print((bb[0],bb[1]), (bb[0] + bb[2], bb[1] + bb[3]))
         out.write(frame)
 
     # Calculate the drone instanenous velocity, drone FOR
@@ -198,22 +199,24 @@ def main():
     vidcap = cv2.VideoCapture(args.video)
     success, frame_prev = vidcap.read()
     frame_num = 0
-    skip = 1
+    skip = 60
 
     # Create output video for debugging
-    out = cv2.VideoWriter('{}_out.avi'.format(args.video),
-            cv2.VideoWriter_fourcc('M','J','P','G'), 10,
-            (frame_prev.shape[0],frame_prev.shape[1]))
+    # out = cv2.VideoWriter('{}_out.avi'.format(args.video),
+    #         cv2.VideoWriter_fourcc('M','J','P','G'), 10,
+    #         (frame_prev.shape[0],frame_prev.shape[1]))
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter('output.avi',fourcc, frame_rate / skip, (frame_prev.shape[1],frame_prev.shape[0]))
 
     while success:
-        frame_num = frame_num + 1
-        log.debug('FRAME: {}'.format(frame_num))
-
         # Grab frame
         for i in range(skip):
+            frame_num = frame_num + 1
             success,frame_cur = vidcap.read()
         if not success or frame_cur is None:
             break
+
+        log.debug('FRAME: {}'.format(frame_num))
 
         # Grab all annotations for this frame number (column #5)
         bounding_boxes = None
