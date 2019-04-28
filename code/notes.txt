@@ -1,0 +1,30 @@
+Excellent example doing about what we want to do
+https://avisingh599.github.io/vision/monocular-vo/
+
+
+https://hub.packtpub.com/exploring-structure-motion-using-opencv/
+
+
+
+
+camera calibration suggestions
+https://gist.github.com/dbaldwin/21d55b134d71fd66e06dce8b91651a03
+
+
+
+
+stereo:
+https://stackoverflow.com/questions/48548158/depth-disparity-map-from-a-moving-camera-in-opencv
+https://www.researchgate.net/post/How_to_get_depth_map_from_uncalibrated_stereo_system_with_opencv
+
+
+
+position estimation:
+https://stackoverflow.com/questions/33906111/how-do-i-estimate-positions-of-two-cameras-in-opencv
+
+
+
+
+https://www.mathworks.com/help/vision/examples/structure-from-motion-from-two-views.html
+https://hub.packtpub.com/exploring-structure-motion-using-opencv/
+https://www.mathworks.com/help/vision/ug/structure-from-motion.html
