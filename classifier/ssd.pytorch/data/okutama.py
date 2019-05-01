@@ -4,17 +4,19 @@ Author: Michael Snower
 """
 
 import os.path as osp
+import os
 import sys
 import torch
 import torch.utils.data as data
-import cv2
+import cv2 as cv
 import numpy as np
+from glob import glob
 
 from pdb import set_trace as bp
 
 OKUTAMA_CLASSES = ('pedestrian') # always index 0 
 
-OKUTAMA_ROOT = '/data/jhtlab/msnower/okutama/Train-Set/'
+OKUTAMA_ROOT = '/data/jhtlab/msnower/okutama_dataset/Train-Set/'
 
 
 class OkutamaAnnotationTransform(object):
@@ -29,12 +31,6 @@ class OkutamaAnnotationTransform(object):
         height (int): height
         width (int): width
     """
-
-    def __init__(self, class_to_ind=None, keep_difficult=False):
-        self.class_to_ind = class_to_ind or dict(
-            zip(VOC_CLASSES, range(len(VOC_CLASSES))))
-        self.keep_difficult = keep_difficult
-
     def __call__(self, target, width, height):
         """
         Arguments:
@@ -43,27 +39,19 @@ class OkutamaAnnotationTransform(object):
         Returns:
             a list containing lists of bounding boxes  [bbox coords, class name]
         """
+        # divide by extra scale lables are in 4k and images are lower res
+        extra_scale = 3840. / width
+
         res = []
-        for obj in target.iter('object'):
-            difficult = int(obj.find('difficult').text) == 1
-            if not self.keep_difficult and difficult:
-                continue
-            name = obj.find('name').text.lower().strip()
-            bbox = obj.find('bndbox')
+        scale = np.array([width, height, width, height])
+        for t in target:
+            bbox = np.asarray(t[:4], np.int32)
+            bbox = bbox / extra_scale
+            scaled = list(bbox / scale)
+            scaled.append(t[4])
+            res.append(scaled)
 
-            pts = ['xmin', 'ymin', 'xmax', 'ymax']
-            bndbox = []
-            for i, pt in enumerate(pts):
-                cur_pt = int(bbox.find(pt).text) - 1
-                # scale height or width
-                cur_pt = cur_pt / width if i % 2 == 0 else cur_pt / height
-                bndbox.append(cur_pt)
-            label_idx = self.class_to_ind[name]
-            bndbox.append(label_idx)
-            res += [bndbox]  # [xmin, ymin, xmax, ymax, label_ind]
-            # img_id = target.find('filename').text[:-4]
-
-        return res  # [[xmin, ymin, xmax, ymax, label_ind], ... ]
+        return res # [[xmin, ymin, xmax, ymax, label_ind], ... ]
 
 
 class OkutamaDetection(data.Dataset):
@@ -85,51 +73,99 @@ class OkutamaDetection(data.Dataset):
 
     def __init__(
         self, dataset_root, transform=None,
-        target_transform=VOCAnnotationTransform(), name='okutama'):
+        target_transform=OkutamaAnnotationTransform(), name='okutama'):
 
         self.dataset_root = dataset_root
         self.name = name
         self.imgs_root = dataset_root
         self.labels_root = osp.join(dataset_root, 'Labels', 'MultiActionLabels', '3840x2160')
 
-        self.ids = list()
-        for d_dir in 
+        print('creating dataset ids')
 
-        # for (year, name) in image_sets:
-        #     rootpath = osp.join(self.root, 'VOC' + year)
-        #     for line in open(osp.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
-        #         self.ids.append((rootpath, line.strip()))
+        self.ids = list()
+        for d_dir in os.listdir(self.imgs_root):
+            if d_dir == 'Labels':
+                continue
+            cur_d_dir = os.path.join(self.imgs_root, d_dir)
+            for time_dir in os.listdir(cur_d_dir):
+                cur_time_dir = os.path.join(cur_d_dir, time_dir, 'Extracted-Frames-1280x720')
+                for vid_dir in os.listdir(cur_time_dir):
+                    cur_vid_dir = os.path.join(cur_time_dir, vid_dir)
+                    frame_paths = glob(os.path.join(cur_vid_dir, '*.jpg'))
+
+                    def _get_frame_labels(vd):
+                        p_ = [lp for lp in os.listdir(self.labels_root) \
+                              if '.'.join(lp.split('.')[:3]) == vd][0]
+                        p = os.path.join(self.labels_root, p_)
+
+                        lines = [l.strip().split(' ')[:9] for l in open(p)]
+                        lines = np.asarray(lines, dtype=np.int32)
+                        num_frames = np.max(lines[:, 5])
+                        fls = [[] for _ in range(num_frames + 1)]
+                        for line in lines:
+                            frame_num = line[5]
+                            # ignore annotations where the human is lost
+                            if line[7] == 1 or line[8] == 1:
+                                continue
+                            else:
+                                # get bbox coords and add 0 for label
+                                fls[frame_num].append(line.tolist()[1:5] + [0])
+                        return fls
+
+                    frame_labels = _get_frame_labels(vid_dir)
+                    frame_paths.sort(key=lambda p: int(p.split('/')[-1].split('.')[0]))
+                    
+                    # remove extraneous frames at the end of the dataset with no people
+                    if len(frame_labels) < len(frame_paths):
+                        frame_paths = frame_paths[:len(frame_labels)]
+
+                    for (f_p, f_l) in zip(frame_paths, frame_labels):
+                        # skip frames with no people (and thus have no label)
+                        f_l_ = np.asarray(f_l)
+                        if len(f_l_.shape) < 2:
+                            continue
+
+                        self.ids.append((f_p, f_l))
+
+        print('created dataset with {} ids'.format(len(self.ids)))
 
         self.transform = transform
         self.target_transform = target_transform
 
     def __getitem__(self, index):
-        im, gt, h, w = self.pull_item(index)
+        im, gt, h, w, img_orig, target_orig = self.pull_item(index)
 
-        return im, gt
+        return im, gt, img_orig, target_orig
 
     def __len__(self):
         return len(self.ids)
 
     def pull_item(self, index):
-        img_id = self.ids[index]
+        f_p, f_l = self.ids[index]
 
-        target = ET.parse(self._annopath % img_id).getroot()
-        img = cv2.imread(self._imgpath % img_id)
+        min_dim = 300
+        aspect_ratio = 16 / 9.
+
+        target = f_l
+        img = cv.imread(f_p)
+        img = cv.resize(img, (int(aspect_ratio * min_dim), min_dim))
         height, width, channels = img.shape
 
+        img_orig = img.copy()
+        target_orig = target[:]
+
         if self.target_transform is not None:
-            target = self.target_transform(target, width, height)
+            target = self.target_transform(target, height, width)
 
         if self.transform is not None:
-            target = np.array(target)
+            target = np.asarray(target, dtype=np.float32)
             img, boxes, labels = self.transform(img, target[:, :4], target[:, 4])
-            # to rgb
-            img = img[:, :, (2, 1, 0)]
-            # img = img.transpose(2, 0, 1)
+
+            img = img[:, :, (2, 1, 0)] # to rgb
+
             target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
-        return torch.from_numpy(img).permute(2, 0, 1), target, height, width
-        # return torch.from_numpy(img), target, height, width
+
+        return torch.from_numpy(img).permute(2, 0, 1), target, height, width, img_orig, target_orig
 
     def pull_image(self, index):
         '''Returns the original image object at index in PIL form
@@ -142,8 +178,8 @@ class OkutamaDetection(data.Dataset):
         Return:
             PIL img
         '''
-        img_id = self.ids[index]
-        return cv2.imread(self._imgpath % img_id, cv2.IMREAD_COLOR)
+        f_p, _ = self.ids[index]
+        return cv2.imread(f_p)
 
     def pull_anno(self, index):
         '''Returns the original annotation of image at index
@@ -157,10 +193,9 @@ class OkutamaDetection(data.Dataset):
             list:  [img_id, [(label, bbox coords),...]]
                 eg: ('001718', [('dog', (96, 13, 438, 332))])
         '''
-        img_id = self.ids[index]
-        anno = ET.parse(self._annopath % img_id).getroot()
-        gt = self.target_transform(anno, 1, 1)
-        return img_id[1], gt
+        _, f_l = self.ids[index]
+        gt = self.target_transform(f_l, 1, 1) # CHNAGE THIS!!!!!!
+        return str(index), gt
 
     def pull_tensor(self, index):
         '''Returns the original image at an index in tensor form

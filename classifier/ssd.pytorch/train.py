@@ -15,6 +15,8 @@ import torch.utils.data as data
 import numpy as np
 import argparse
 
+import cv2 as cv
+
 from pdb import set_trace as bp
 
 def str2bool(v):
@@ -23,9 +25,9 @@ def str2bool(v):
 parser = argparse.ArgumentParser(
     description='Single Shot MultiBox Detector Training With Pytorch')
 train_set = parser.add_mutually_exclusive_group()
-parser.add_argument('--dataset', default='VOC', choices=['VOC', 'COCO'],
-                    type=str, help='VOC or COCO')
-parser.add_argument('--dataset_root', default=VOC_ROOT,
+parser.add_argument('--dataset', choices=['VOC', 'COCO', 'okutama'], default='okutama', #default='VOC', 
+                    type=str, help='VOC or COCO or okutama')
+parser.add_argument('--dataset_root', default=OKUTAMA_ROOT, #default=VOC_ROOT,
                     help='Dataset root directory path')
 parser.add_argument('--basenet', default='vgg16_reducedfc.pth',
                     help='Pretrained base model')
@@ -53,7 +55,9 @@ parser.add_argument('--visdom', default=False, type=str2bool,
                     help='Use visdom for loss visualization')
 parser.add_argument('--save_folder', default='weights/',
                     help='Directory for saving checkpoint models')
-parser.add_argument('--name', type=str, default='test', help='Name of the experiment.')
+parser.add_argument('--name', type=str, default='test_okutama', help='Name of the experiment.')
+parser.add_argument('--no_transform', action='store_true', help='Whether to transform images.')
+parser.add_argument('--log_every', type=int, default=10, help='frequency to log')
 args = parser.parse_args()
 
 
@@ -92,9 +96,16 @@ def train():
         if args.dataset_root == COCO_ROOT:
             parser.error('Must specify dataset if specifying dataset_root')
         cfg = voc
-        dataset = VOCDetection(root=args.dataset_root,
-                               transform=SSDAugmentation(cfg['min_dim'],
-                                                         MEANS))
+        transform = SSDAugmentation(cfg['min_dim'], MEANS) if not args.no_transform else None
+        dataset = VOCDetection(root=args.dataset_root, transform=transform)
+
+    elif args.dataset == 'okutama':
+        if args.dataset_root != OKUTAMA_ROOT:
+            parser.error('Please specify Okutama dataset root.')
+        cfg = okutama
+        dataset = OkutamaDetection(
+            dataset_root=args.dataset_root,
+            transform=SSDAugmentation(cfg['min_dim'], MEANS))
 
     if args.visdom:
         import visdom
@@ -170,7 +181,18 @@ def train():
 
         if iteration != 0 and (iteration % epoch_size == 0):
             epoch += 1
+
+            with open(log_path) as l:
+                past_losses = l.readlines()
+                num_lines = epoch_size // args.log_every
+                epoch_lines = past_losses[-num_lines:]
+                epoch_losses = [int(float(line.split('||')[-1].split(':')[-1].strip())) \
+                                for line in epoch_lines \
+                                if not line.startswith('~')]
+                avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
+
             with open(log_path, 'a+') as l:
+                l.write('~ Avg epoch loss: {:4f} \n'.format(avg_epoch_loss))
                 l.write('~~~~~~~~~~~~~~~~~~~~ Epoch {} ~~~~~~~~~~~~~~~~~~~~ \n'.format(epoch))
 
         if iteration in cfg['lr_steps']:
@@ -179,10 +201,21 @@ def train():
 
         # load train data
         try:
-            images, targets = next(batch_iterator)
+            images, targets, img_orig, target_orig = next(batch_iterator)
         except StopIteration:
             batch_iterator = iter(data_loader)
-            images, targets = next(batch_iterator)
+            images, targets, img_orig, target_orig = next(batch_iterator)
+
+        # print('new batch')
+        # for q, (img, trg) in enumerate(zip(img_orig, target_orig)):
+        #     print(len(trg))
+        #     for t in trg:
+        #         pts = (t[0], t[1]), (t[2], t[3])
+        #         tl, br = [(int(pt[0] / (7.2)), int(pt[1] / (7.2))) \
+        #                    for pt in pts]
+        #         cv.rectangle(img, tl, br, (0, 0, 255), 2)
+        #     cv.imwrite(os.path.join('test_imgs', str(q) + '.jpg'), img)
+        # exit(0)
 
         if args.cuda:
             images = Variable(images.cuda())
@@ -196,14 +229,14 @@ def train():
         # backprop
         optimizer.zero_grad()
         loss_l, loss_c = criterion(out, targets)
-        loss = loss_l + loss_c
+        loss = loss_l # + loss_c
         loss.backward()
         optimizer.step()
         t1 = time.time()
         loc_loss += loss_l.item()
         conf_loss += loss_c.item()
 
-        if iteration % 10 == 0:
+        if iteration % args.log_every == 0:
             time_elapsed = t1 - t0
             print('timer: %.4f sec.' % (time_elapsed))
             print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss.item()), end=' ')
