@@ -29,6 +29,47 @@ def get_camera_pose_from_sfm_data(filename, pose_id):
                 return (np.asarray(p['value']['center']), np.asarray(p['value']['rotation']))
     assert False, 'Unable to discover pose_id {}'.format(pose_id)
 
+# http://cvrs.whu.edu.cn/downloads/ebooks/Multiple%20View%20Geometry%20in%20Computer%20Vision%20(Second%20Edition).pdf
+# pg 155
+def real_world_to_pixel(K, R, C, X):
+    IC = np.c_[ np.identity(3), -C ]
+    XX = np.append(X, 1)
+    out = np.matmul(np.matmul(np.matmul(K, R), IC), XX.T)
+    out = out / out[2]
+    return out
+
+# # https://math.stackexchange.com/questions/2237994/back-projecting-pixel-to-3d-rays-in-world-coordinates-using-pseudoinverse-method?
+# def pixel_to_real_world(K, R, C, x):
+#     IC = np.c_[ np.identity(3), -C ]
+#     xx = np.append(x, 1)
+#     # np.matmul(np.linalg.inv(IC np.matmul(np.linalg.inv(R), np.matmul(np.linalg.inv(K), xx))
+#     B = np.matmul(np.matmul(K, R), IC)
+#     X, resid, rank, s = np.linalg.lstsq(B, xx.T)
+#     # x,resid,rank,s = np.linalg.lstsq(B,b)
+#     return X
+
+# def pixel_to_real_world2(K, R, C, x):
+#     xx = np.append(x, 1)
+#     P = K.dot(np.c_[R, C])
+#     X = np.dot(np.linalg.pinv(P),xx)
+#     return X
+
+# http://cvrs.whu.edu.cn/downloads/ebooks/Multiple%20View%20Geometry%20in%20Computer%20Vision%20(Second%20Edition).pdf
+# p 161 "The projective camera"
+# NOTE - points relative to camera, so absolute real world coordinates should be adjusted by C
+def pixel_to_real_world(K, R, C, x):
+    IC = np.c_[ np.identity(3), -C ]
+    xx = np.append(x, 1)
+    P = np.matmul(np.matmul(K, R), IC)
+    Pt = np.matmul(P.T, np.linalg.inv(np.matmul(P, P.T)))
+    X = np.matmul(Pt, xx)
+    X = X / X[3]
+    X = X[:3] - C
+    return X
+
+
+# X = np.dot(lin.pinv(P),p1)
+
 def camera_pose_to_frustrum_norms(R, focal, cc, bounding_box):
     """
     @param R            numpy array (3x3) representing the camera optical center rotation
@@ -46,21 +87,30 @@ def camera_pose_to_frustrum_norms(R, focal, cc, bounding_box):
 
     # TODO - account for radial distortion?
 
+    # explanation of coordinates https://github.com/openMVG/openMVG/issues/788
     # apply rotations
-    v0 = np.matmul(R, v0)
-    v1 = np.matmul(R, v1)
-    v2 = np.matmul(R, v2)
-    v3 = np.matmul(R, v3)
+    # v0 = np.matmul(R, v0)
+    # v1 = np.matmul(R, v1)
+    # v2 = np.matmul(R, v2)
+    # v3 = np.matmul(R, v3)
+    # v0 = np.dot(R, v0)
+    # v1 = np.dot(R, v1)
+    # v2 = np.dot(R, v2)
+    # v3 = np.dot(R, v3)
     # # apply translations
     # v0 = v0 + P
     # v1 = v1 + P
     # v2 = v2 + P
     # v3 = v3 + P
 
-    # print(v0)
-    # print(v1)
-    # print(v2)
-    # print(v3)
+    print(v0 / v0[2] * 0.68)
+    print(v1 / v1[2] * 0.68)
+    print(v2 / v2[2] * 0.68)
+    print(v3 / v3[2] * 0.68)
+    # print(v0 / v0[2] * 0.668)
+    # print(v1 / v1[2] * 0.668)
+    # print(v2 / v2[2] * 0.668)
+    # print(v3 / v3[2] * 0.668)
 
     # why would i need to invert the rotation of the pose?
     # Ri = np.linalg.inv(R)
@@ -208,3 +258,24 @@ def rotationMatrixToEulerAngles(R) :
         z = 0
  
     return np.array([x, y, z])
+
+# From https://www.learnopencv.com/rotation-matrix-to-euler-angles/
+def eulerAnglesToRotationMatrix(theta) :
+    R_x = np.array([[1,         0,                  0                   ],
+                    [0,         math.cos(theta[0]), -math.sin(theta[0]) ],
+                    [0,         math.sin(theta[0]), math.cos(theta[0])  ]
+                    ])
+ 
+    R_y = np.array([[math.cos(theta[1]),    0,      math.sin(theta[1])  ],
+                    [0,                     1,      0                   ],
+                    [-math.sin(theta[1]),   0,      math.cos(theta[1])  ]
+                    ])
+                 
+    R_z = np.array([[math.cos(theta[2]),    -math.sin(theta[2]),    0],
+                    [math.sin(theta[2]),    math.cos(theta[2]),     0],
+                    [0,                     0,                      1]
+                    ])
+
+    R = np.dot(R_z, np.dot( R_y, R_x ))
+ 
+    return R

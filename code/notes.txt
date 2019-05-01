@@ -28,3 +28,9 @@ https://stackoverflow.com/questions/33906111/how-do-i-estimate-positions-of-two-
 https://www.mathworks.com/help/vision/examples/structure-from-motion-from-two-views.html
 https://hub.packtpub.com/exploring-structure-motion-using-opencv/
 https://www.mathworks.com/help/vision/ug/structure-from-motion.html
+
+
+
+
+----
+https://github.com/openMVG/openMVG/issues/635
