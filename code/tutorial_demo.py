@@ -22,13 +22,8 @@ def get_parent_dir(directory):
     return os.path.dirname(directory)
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-input_eval_dir = os.path.abspath("../out")
-# Checkout an OpenMVG image dataset with Git
-#if not os.path.exists(input_eval_dir):
-#  pImageDataCheckout = subprocess.Popen([ "git", "clone", "https://github.com/openMVG/ImageDataset_SceauxCastle.git" ])
-#  pImageDataCheckout.wait()
 
-output_eval_dir = os.path.join(get_parent_dir(input_eval_dir), "tutorial_out")
+output_eval_dir = os.path.join(get_parent_dir(input_eval_dir), "out")
 input_eval_dir = os.path.join(input_eval_dir, "images")
 if not os.path.exists(output_eval_dir):
   os.mkdir(output_eval_dir)
