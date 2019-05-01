@@ -70,7 +70,7 @@ def pixel_to_real_world(K, R, C, x):
 
 # X = np.dot(lin.pinv(P),p1)
 
-def camera_pose_to_frustrum_norms(R, focal, cc, bounding_box):
+def camera_pose_to_frustrum_norms(K, R, C, bounding_box):
     """
     @param R            numpy array (3x3) representing the camera optical center rotation
     @param focal        focal length in pixels
@@ -80,10 +80,14 @@ def camera_pose_to_frustrum_norms(R, focal, cc, bounding_box):
                         of the planes that make up the frustrum of the specified bounding box
                         applied at the specified camera pose.
     """
-    v0 = np.asarray((bounding_box[0] - cc[0], bounding_box[1] - cc[1], focal))
-    v1 = np.asarray((bounding_box[2] - cc[0], bounding_box[1] - cc[1], focal))
-    v2 = np.asarray((bounding_box[2] - cc[0], bounding_box[3] - cc[1], focal))
-    v3 = np.asarray((bounding_box[0] - cc[0], bounding_box[3] - cc[1], focal))
+    v0 = pixel_to_real_world(K, R, C, np.asarray((bounding_box[0], bounding_box[1])))
+    v1 = pixel_to_real_world(K, R, C, np.asarray((bounding_box[2], bounding_box[1])))
+    v2 = pixel_to_real_world(K, R, C, np.asarray((bounding_box[2], bounding_box[3])))
+    v3 = pixel_to_real_world(K, R, C, np.asarray((bounding_box[0], bounding_box[3])))
+    # v0 = np.asarray((bounding_box[0] - cc[0], bounding_box[1] - cc[1], focal))
+    # v1 = np.asarray((bounding_box[2] - cc[0], bounding_box[1] - cc[1], focal))
+    # v2 = np.asarray((bounding_box[2] - cc[0], bounding_box[3] - cc[1], focal))
+    # v3 = np.asarray((bounding_box[0] - cc[0], bounding_box[3] - cc[1], focal))
 
     # TODO - account for radial distortion?
 
@@ -103,10 +107,10 @@ def camera_pose_to_frustrum_norms(R, focal, cc, bounding_box):
     # v2 = v2 + P
     # v3 = v3 + P
 
-    print(v0 / v0[2] * 0.68)
-    print(v1 / v1[2] * 0.68)
-    print(v2 / v2[2] * 0.68)
-    print(v3 / v3[2] * 0.68)
+    # print(v0 / v0[2] * 0.68)
+    # print(v1 / v1[2] * 0.68)
+    # print(v2 / v2[2] * 0.68)
+    # print(v3 / v3[2] * 0.68)
     # print(v0 / v0[2] * 0.668)
     # print(v1 / v1[2] * 0.668)
     # print(v2 / v2[2] * 0.668)
