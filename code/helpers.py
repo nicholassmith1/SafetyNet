@@ -2,31 +2,73 @@ import numpy as np
 import math
 import json
 from plyfile import PlyData, PlyElement
+import os
 
-def get_camera_intrinsic_from_sfm_data(filename):
+def get_camera_intrinsic_from_sfm_data(sfm_json):
     """
-    @param filename     sfm_data.json file
+    @param sfm_json     sfm_data.json file content
     @param pose_id      the camera position (extrinsic) data to retrieve
     @return P, R        numpy position and rotation matrices
     """
-    with open(filename, 'r') as file:
-        js = json.load(file)
-        return js['intrinsics'][0]['value']['ptr_wrapper']['data']
-    assert False, 'Unable to discover intrinsic'
+    return sfm_json['intrinsics'][0]['value']['ptr_wrapper']['data']
 
 
-def get_camera_pose_from_sfm_data(filename, pose_id):
+def get_frame_id_to_pose_id_map(sfm_json):
     """
-    @param filename     sfm_data.json file
+    @param sfm_json     sfm_data.json file content
+    @param frame_id    the video frame number to get a pose id for
+    @return             a numpy Nx2 array of (frame_id, pose_id)
+    """
+    ret = []
+    views = sfm_json['views']
+    for view in range(len(views)):
+        data = views[view]['value']['ptr_wrapper']['data']
+        name = data['filename']
+        name, ext = os.path.splitext(os.path.basename(name))
+        name = name.split('_')
+        try:
+            name = name[len(name) - 1]
+            num = int(name)
+            ret.append([num, data['id_pose']])
+        except:
+            pass
+    return np.asarray(ret)
+
+
+# def get_pose_id_for_frame_id(filename, frame_id):
+#     """
+#     @param filename     sfm_data.json file
+#     @param frame_id    the video frame number to get a pose id for
+#     @return             frame number, of -1 if it doesn't exist
+#     """
+#     with open(filename, 'r') as file:
+#         js = json.load(file)
+#         # FIXME - wow. I'm super inefficient
+#         views = js['views']
+#         for view in range(len(views)):
+#             data = js['views'][view]['value']['ptr_wrapper']['data']
+#             name = data['filename']
+#             name, ext = os.path.splitext(os.path.basename(name))
+#             name = name.split('_')
+#             try:
+#                 name = name[len(name) - 1]
+#                 num = int(name)
+#                 if num == frame_id:
+#                     return data['id_pose']
+#             except:
+#                 pass
+#     return -1
+
+def get_camera_pose_from_sfm_data(sfm_json, pose_id):
+    """
+    @param sfm_json     sfm_data.json file content
     @param pose_id      the camera position (extrinsic) data to retrieve
     @return P, R        numpy position and rotation matrices
     """
-    with open(filename, 'r') as file:
-        js = json.load(file)
-        poses = js['extrinsics']
-        for p in poses:
-            if p['key'] == pose_id:
-                return (np.asarray(p['value']['center']), np.asarray(p['value']['rotation']))
+    poses = sfm_json['extrinsics']
+    for p in poses:
+        if p['key'] == pose_id:
+            return (np.asarray(p['value']['center']), np.asarray(p['value']['rotation']))
     assert False, 'Unable to discover pose_id {}'.format(pose_id)
 
 # http://cvrs.whu.edu.cn/downloads/ebooks/Multiple%20View%20Geometry%20in%20Computer%20Vision%20(Second%20Edition).pdf
@@ -70,69 +112,6 @@ def pixel_to_real_world(K, R, C, x):
 
 # X = np.dot(lin.pinv(P),p1)
 
-def camera_pose_to_frustrum_norms(K, R, C, bounding_box):
-    """
-    @param R            numpy array (3x3) representing the camera optical center rotation
-    @param focal        focal length in pixels
-    @param cc           principle point (Cx, Cy) in pixels
-    @param bounding_box bounding boxes, in pixel, in the form (x0, y0, x1, y1)
-    @return             numpy array (4x3) of vectors representing the normal vectors
-                        of the planes that make up the frustrum of the specified bounding box
-                        applied at the specified camera pose.
-    """
-    v0 = pixel_to_real_world(K, R, C, np.asarray((bounding_box[0], bounding_box[1])))
-    v1 = pixel_to_real_world(K, R, C, np.asarray((bounding_box[2], bounding_box[1])))
-    v2 = pixel_to_real_world(K, R, C, np.asarray((bounding_box[2], bounding_box[3])))
-    v3 = pixel_to_real_world(K, R, C, np.asarray((bounding_box[0], bounding_box[3])))
-    # v0 = np.asarray((bounding_box[0] - cc[0], bounding_box[1] - cc[1], focal))
-    # v1 = np.asarray((bounding_box[2] - cc[0], bounding_box[1] - cc[1], focal))
-    # v2 = np.asarray((bounding_box[2] - cc[0], bounding_box[3] - cc[1], focal))
-    # v3 = np.asarray((bounding_box[0] - cc[0], bounding_box[3] - cc[1], focal))
-
-    # TODO - account for radial distortion?
-
-    # explanation of coordinates https://github.com/openMVG/openMVG/issues/788
-    # apply rotations
-    # v0 = np.matmul(R, v0)
-    # v1 = np.matmul(R, v1)
-    # v2 = np.matmul(R, v2)
-    # v3 = np.matmul(R, v3)
-    # v0 = np.dot(R, v0)
-    # v1 = np.dot(R, v1)
-    # v2 = np.dot(R, v2)
-    # v3 = np.dot(R, v3)
-    # # apply translations
-    # v0 = v0 + P
-    # v1 = v1 + P
-    # v2 = v2 + P
-    # v3 = v3 + P
-
-    # print(v0 / v0[2] * 0.68)
-    # print(v1 / v1[2] * 0.68)
-    # print(v2 / v2[2] * 0.68)
-    # print(v3 / v3[2] * 0.68)
-    # print(v0 / v0[2] * 0.668)
-    # print(v1 / v1[2] * 0.668)
-    # print(v2 / v2[2] * 0.668)
-    # print(v3 / v3[2] * 0.668)
-
-    # why would i need to invert the rotation of the pose?
-    # Ri = np.linalg.inv(R)
-    # v0 = np.matmul(Ri, v0)
-    # v1 = np.matmul(Ri, v1)
-    # v2 = np.matmul(Ri, v2)
-    # v3 = np.matmul(Ri, v3)
-
-    # watch the winding consistency (normal vectors should point inwards)
-    n = np.empty((4, 3))
-    n[0,:] = np.cross(v0, v1)
-    n[1,:] = np.cross(v1, v2)
-    n[2,:] = np.cross(v2, v3)
-    n[3,:] = np.cross(v3, v0)
-
-    # return n
-    return (n, np.asarray([v0, v1, v2, v3]))
-
 def get_points_from_ply(filename):
     """
     Extract all vertex points from the specified PLY file
@@ -147,23 +126,6 @@ def get_points_from_ply(filename):
         pts[:, 2] = np.asarray(ve['z'])
         return pts
     assert False, 'Failure to import points'
-
-def get_points_inside_frustrum(points, frustrum_norms):
-    """
-    @param points       numpy array (Nx3) of points in the scene
-    @param frustrum_nroms   numpy array (4x3) representing the planar normal vectors
-                        of the frustrum
-    @return             numpy array (Nx1) of bool, True if the point is within the
-                        frustrum, False otherwise
-    """
-    # Dot each point onto each frustrum norm to get it's projection.
-    # Results in an Nx4 matrix
-    dots = np.dot(points, frustrum_norms.T)
-    # For a point to be within the frustrum, the projection on each normal
-    # vector must be positive
-    return (dots >= 0).all(axis=1)
-
-
 
 # Testing code
 # As a general note to myself, I'm considering all FOR as +x camera right,
@@ -244,6 +206,60 @@ def classify_pedestrian(pedestrian_vel_abs):
 
 def estimate_epicenter(epicenter_prev, pedestrian_class, pedestrian_pos, pedestrian_vel_abs):
     pass
+
+
+# From: https://stackoverflow.com/questions/26646362/numpy-array-is-not-json-serializable
+class NumpyEncoder(json.JSONEncoder):
+    """ Special json encoder for numpy types """
+    def default(self, obj):
+        if isinstance(obj, (np.int_, np.intc, np.intp, np.int8,
+            np.int16, np.int32, np.int64, np.uint8,
+            np.uint16, np.uint32, np.uint64)):
+            return int(obj)
+        elif isinstance(obj, (np.float_, np.float16, np.float32, 
+            np.float64)):
+            return float(obj)
+        elif isinstance(obj,(np.ndarray,)):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
+
+        
+def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_pose, pedestrians_vel, K, frame_rate):
+    frames = []
+    for frame_id in range(frame_num):
+        drone = {
+            "pose" : drone_pose[frame_id],
+            "R" : drone_rot[frame_id],
+            "vel" : np.zeros(3) # TODO - placeholder
+        }
+        # Get pedestrian data
+        pedestrians = []
+        for pdata in pedestrians_pose[pedestrians_pose[:, 0] == frame_id]:
+            p = {
+                "id" : pdata[1],
+                "pose" : pdata[2:5],
+                # "vel" : pdata[5:8]
+                "vel" : np.zeros(3)  # TODO - placeholder
+            }
+            pedestrians.append(p)
+        # Assemble frame
+        frame = {
+            "frame_id" : frame_id,
+            "drone" : drone,
+            "epicenter" : np.zeros(3),
+            "pedestrians": pedestrians
+        }
+        frames.append(frame)
+        
+    data = {}
+    data['scale'] = 1.0 # placeholder
+    data['timedelta'] = 1 / frame_rate
+    data['K'] = K
+    data['frames'] = frames
+    data_dump = json.dumps(data, cls=NumpyEncoder, indent=4)
+    print(data_dump)
+    with open(os.path.join(out_dir, 'safetynet.json'), 'w') as f:
+        json.dump(data_dump, f)
 
 
 # From https://www.learnopencv.com/rotation-matrix-to-euler-angles/
