@@ -11,12 +11,12 @@ import json
 from pdb import set_trace as bp
 
 class PeopleTracker(object):
-    def __init__(self, frame_paths, predictions_path, return_json=False):
+    def __init__(self, frame_paths, predictions_path, export_as='list'):
         self.frame_paths = frame_paths
         self.predictions = self._get_predictions(predictions_path)
         self.cur_id = 0
         self.people_dict = {}
-        self.return_json = False
+        self.export_as = export_as
 
     def _get_predictions(self, predictions_path):
         predictions = {}
@@ -54,7 +54,10 @@ class PeopleTracker(object):
             p for p in self.people_dict.values()
             if p.confirmed_real
         ]
-        if self.return_json:
+
+        if self.export_as == 'viz':
+            return self._export_as_viz(real_people)
+        elif self.export_as == 'json':
             return self._export_as_json(real_people)
         else:
             return real_people
@@ -157,6 +160,21 @@ class PeopleTracker(object):
             data['people'].append(person_data)
         return json.dumps(data)
 
+    def _export_as_viz(self, people):
+        # [p_id, frame_id, xmin, ymin, xmax, ymax]
+        data = []
+        for p in people:
+            for loc in p.prev_locations_bbox:
+                if loc[0] > -1:
+                    data.append([
+                        p.id, int(loc[-1].split('_')[-1]), 
+                        loc[0], loc[1], loc[2], loc[3]
+                    ])
+        data = np.asarray(data, dtype=np.float32)
+        # to 4k res
+        data *= 3
+        return data
+
 class Person(object):
     def __init__(self, _id, pred):
         self.id = _id
@@ -192,7 +210,7 @@ if __name__ == '__main__':
     frame_paths_sorted = sorted(
         frame_paths, key=lambda p: int(p.split('/')[-1].split('_')[-1].split('.')[0]))
     predictions_path = os.path.join(frames_dir, 'combined.txt')
-    PT = PeopleTracker(frame_paths_sorted, predictions_path)
+    PT = PeopleTracker(frame_paths_sorted, predictions_path, export_as='viz')
     people = PT.track()
 
     if viz:
