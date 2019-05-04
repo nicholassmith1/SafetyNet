@@ -3,9 +3,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from data import coco as cfg
 from ..box_utils import match, log_sum_exp
 
+from pdb import set_trace as bp
 
 class MultiBoxLoss(nn.Module):
     """SSD Weighted Loss Function
@@ -31,7 +31,7 @@ class MultiBoxLoss(nn.Module):
     """
 
     def __init__(self, num_classes, overlap_thresh, prior_for_matching,
-                 bkg_label, neg_mining, neg_pos, neg_overlap, encode_target,
+                 bkg_label, neg_mining, neg_pos, neg_overlap, encode_target, cfg,
                  use_gpu=True):
         super(MultiBoxLoss, self).__init__()
         self.use_gpu = use_gpu

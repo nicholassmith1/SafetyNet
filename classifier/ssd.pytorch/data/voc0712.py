@@ -19,16 +19,18 @@ else:
 
 from pdb import set_trace as bp
 
-VOC_CLASSES = (  # always index 0
-    'aeroplane', 'bicycle', 'bird', 'boat',
-    'bottle', 'bus', 'car', 'cat', 'chair',
-    'cow', 'diningtable', 'dog', 'horse',
-    'motorbike', 'person', 'pottedplant',
-    'sheep', 'sofa', 'train', 'tvmonitor')
+# VOC_CLASSES = (  # always index 0
+#     'aeroplane', 'bicycle', 'bird', 'boat',
+#     'bottle', 'bus', 'car', 'cat', 'chair',
+#     'cow', 'diningtable', 'dog', 'horse',
+#     'motorbike', 'person', 'pottedplant',
+#     'sheep', 'sofa', 'train', 'tvmonitor')
+VOC_CLASSES = ('person')
 
 # note: if you used our download scripts, this should be right
 VOC_ROOT = '/data/jhtlab/deep/datasets/VOCdevkit/'
 
+BINARY = True
 
 class VOCAnnotationTransform(object):
     """Transforms a VOC annotation into a Tensor of bbox coords and label index
@@ -43,10 +45,11 @@ class VOCAnnotationTransform(object):
         width (int): width
     """
 
-    def __init__(self, class_to_ind=None, keep_difficult=False):
+    def __init__(self, class_to_ind=None, keep_difficult=False, binary_classification=False):
         self.class_to_ind = class_to_ind or dict(
-            zip(VOC_CLASSES, range(len(VOC_CLASSES))))
+                zip(VOC_CLASSES, range(len(VOC_CLASSES))))
         self.keep_difficult = keep_difficult
+        self.binary_classification = binary_classification
 
     def __call__(self, target, width, height):
         """
@@ -71,13 +74,20 @@ class VOCAnnotationTransform(object):
                 # scale height or width
                 cur_pt = cur_pt / width if i % 2 == 0 else cur_pt / height
                 bndbox.append(cur_pt)
-            label_idx = self.class_to_ind[name]
-            bndbox.append(label_idx)
-            res += [bndbox]  # [xmin, ymin, xmax, ymax, label_ind]
+            if not self.binary_classification:
+                label_idx = self.class_to_ind[name]
+                bndbox.append(label_idx)
+                res += [bndbox]  # [xmin, ymin, xmax, ymax, label_ind]
+            else:
+                label_idx = 0
+                bndbox.append(label_idx)
+                if name == 'person':
+                    res += [bndbox]  # [xmin, ymin, xmax, ymax, label_ind]
             # img_id = target.find('filename').text[:-4]
 
         return res  # [[xmin, ymin, xmax, ymax, label_ind], ... ]
 
+CLASS_TO_IND = dict(zip(VOC_CLASSES, range(len(VOC_CLASSES))))
 
 class VOCDetection(data.Dataset):
     """VOC Detection Dataset Object
@@ -97,8 +107,10 @@ class VOCDetection(data.Dataset):
     """
 
     def __init__(self, root,
-                 image_sets=[('2012', 'trainval')],
-                 transform=None, target_transform=VOCAnnotationTransform(),
+                 image_sets=[('2012', 'person_train')],
+                 transform=None,
+                 keep_difficult=False,
+                 target_transform=VOCAnnotationTransform(binary_classification=BINARY),
                  dataset_name='VOC2012'):
         self.root = root
         self.image_set = image_sets
@@ -111,7 +123,13 @@ class VOCDetection(data.Dataset):
         for (year, name) in image_sets:
             rootpath = osp.join(self.root, 'VOC' + year)
             for line in open(osp.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
-                self.ids.append((rootpath, line.strip()))
+                id_, *has_person = line.split(' ')
+                has_person = int(has_person[-1].strip())
+                img_id_ = (rootpath, id_.strip())
+                if has_person > 0:
+                    self.ids.append(img_id_)
+
+        print('created dataset with {} images'.format(len(self.ids)))
 
         # def _transform(index):
         #     img_id = self.ids[index]
@@ -123,12 +141,38 @@ class VOCDetection(data.Dataset):
         # bp()
 
     def __getitem__(self, index):
-        im, gt, h, w = self.pull_item(index)
+        im, gt, h, w, img_orig, targ_orig = self.pull_item(index)
 
-        return im, gt
+        return im, gt, img_orig, targ_orig
 
     def __len__(self):
         return len(self.ids)
+
+    def _get_target_orig(self, target, binary_classification):
+        res = []
+        for obj in target.iter('object'):
+
+            name = obj.find('name').text.lower().strip()
+            bbox = obj.find('bndbox')
+
+            pts = ['xmin', 'ymin', 'xmax', 'ymax']
+            bndbox = []
+            for i, pt in enumerate(pts):
+                cur_pt = int(bbox.find(pt).text) - 1
+                # scale height or width
+                #cur_pt = cur_pt / width if i % 2 == 0 else cur_pt / height
+                bndbox.append(cur_pt)
+            if not binary_classification:
+                label_idx = CLASS_TO_IND[name]
+                bndbox.append(label_idx)
+                res += [bndbox]  # [xmin, ymin, xmax, ymax, label_ind]
+            else:
+                label_idx = 1
+                bndbox.append(label_idx)
+                if name == 'person':
+                    res += [bndbox]  # [xmin, ymin, xmax, ymax, label_ind]
+            #img_id = target.find('filename').text[:-4]
+        return res  # [[xmin, ymin, xmax, ymax, label_ind], ... ]
 
     def pull_item(self, index):
         img_id = self.ids[index]
@@ -136,6 +180,9 @@ class VOCDetection(data.Dataset):
         target = ET.parse(self._annopath % img_id).getroot()
         img = cv2.imread(self._imgpath % img_id)
         height, width, channels = img.shape
+
+        img_orig = img.copy()
+        targ_orig = self._get_target_orig(target, BINARY)
 
         if self.target_transform is not None:
             target = self.target_transform(target, width, height)
@@ -147,7 +194,7 @@ class VOCDetection(data.Dataset):
             img = img[:, :, (2, 1, 0)]
             # img = img.transpose(2, 0, 1)
             target = np.hstack((boxes, np.expand_dims(labels, axis=1)))
-        return torch.from_numpy(img).permute(2, 0, 1), target, height, width
+        return torch.from_numpy(img).permute(2, 0, 1), target, height, width, img_orig, targ_orig
         # return torch.from_numpy(img), target, height, width
 
     def pull_image(self, index):

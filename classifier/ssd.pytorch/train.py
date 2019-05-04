@@ -31,8 +31,10 @@ parser.add_argument('--dataset_root', default=OKUTAMA_ROOT, #default=VOC_ROOT,
                     help='Dataset root directory path')
 parser.add_argument('--basenet', default='vgg16_reducedfc.pth',
                     help='Pretrained base model')
-parser.add_argument('--batch_size', default=32, type=int,
+parser.add_argument('--batch_size', default=6, type=int,
                     help='Batch size for training')
+parser.add_argument('--min_dim', default=300, type=int,
+                    help='Defines the size of the SSD network.')
 parser.add_argument('--resume', default=None, type=str,
                     help='Checkpoint state_dict file to resume training from')
 parser.add_argument('--start_iter', default=0, type=int,
@@ -102,7 +104,10 @@ def train():
     elif args.dataset == 'okutama':
         if args.dataset_root != OKUTAMA_ROOT:
             parser.error('Please specify Okutama dataset root.')
-        cfg = okutama
+        if args.min_dim == 300:
+            cfg = okutama_300_cfg
+        elif args.min_dim == 512:
+            cfg = okutama_512_cfg
         dataset = OkutamaDetection(
             dataset_root=args.dataset_root,
             transform=SSDAugmentation(cfg['min_dim'], MEANS))
@@ -111,7 +116,7 @@ def train():
         import visdom
         viz = visdom.Visdom()
 
-    ssd_net = build_ssd('train', cfg['min_dim'], cfg['num_classes'])
+    ssd_net = build_ssd('train', cfg['min_dim'], cfg)
     net = ssd_net
 
     if args.cuda:
@@ -139,7 +144,7 @@ def train():
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum,
                           weight_decay=args.weight_decay)
     criterion = MultiBoxLoss(cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
-                             False, args.cuda)
+                             False, cfg, args.cuda)
 
     net.train()
     # loss counters
@@ -186,7 +191,7 @@ def train():
                 past_losses = l.readlines()
                 num_lines = epoch_size // args.log_every
                 epoch_lines = past_losses[-num_lines:]
-                epoch_losses = [int(float(line.split('||')[-1].split(':')[-1].strip())) \
+                epoch_losses = [float(line.split('||')[-1].split(':')[-1].strip()) \
                                 for line in epoch_lines \
                                 if not line.startswith('~')]
                 avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
@@ -201,18 +206,18 @@ def train():
 
         # load train data
         try:
-            images, targets, img_orig, target_orig = next(batch_iterator)
+            images, targets, img_orig, targ_orig = next(batch_iterator)
         except StopIteration:
             batch_iterator = iter(data_loader)
-            images, targets, img_orig, target_orig = next(batch_iterator)
+            images, targets, img_orig, targ_orig = next(batch_iterator)
 
         # print('new batch')
-        # for q, (img, trg) in enumerate(zip(img_orig, target_orig)):
+        # for q, (img, trg) in enumerate(zip(img_orig, targ_orig)):
         #     print(len(trg))
         #     for t in trg:
         #         pts = (t[0], t[1]), (t[2], t[3])
-        #         tl, br = [(int(pt[0] / (7.2)), int(pt[1] / (7.2))) \
-        #                    for pt in pts]
+        #         tl, br = [(int(pt[0] / 1), int(pt[1] / 1)) \
+        #                    for pt in pts] # 7.2 for 300, 4.2188,
         #         cv.rectangle(img, tl, br, (0, 0, 255), 2)
         #     cv.imwrite(os.path.join('test_imgs', str(q) + '.jpg'), img)
         # exit(0)
@@ -229,7 +234,7 @@ def train():
         # backprop
         optimizer.zero_grad()
         loss_l, loss_c = criterion(out, targets)
-        loss = loss_l # + loss_c
+        loss = loss_l + loss_c
         loss.backward()
         optimizer.step()
         t1 = time.time()
@@ -238,8 +243,11 @@ def train():
 
         if iteration % args.log_every == 0:
             time_elapsed = t1 - t0
-            print('timer: %.4f sec.' % (time_elapsed))
-            print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss.item()), end=' ')
+            print('iter: {} || '.format(iteration) +
+                    'timer: {:4f} || '.format(time_elapsed) +
+                    'loss_l: {:4f} || '.format(loss_l) + 
+                    'loss_c: {:4f} || '.format(loss_c) + 
+                    'total loss: {:4f} \n'.format(loss))
 
             with open(log_path, 'a+') as l:
                 l.write(
