@@ -10,6 +10,7 @@ from helpers import (rotationMatrixToEulerAngles)
 import os
 import tempfile
 import json
+#import PeopleTracker
 
 from segmentation import find_pedestrians
 # from helpers import (get_points_from_ply,
@@ -114,6 +115,7 @@ def main():
     parser.add_argument('-a', dest='annotations', type=str, default=None,
                     required=False, help='Overrides the neural network calculation of pedestrian \
                     bounding boxes and uses annotations for bounding-box generation')
+    parser.add_argument('-c', dest='combined', type=str, default=None)
     parser.add_argument('--depth_pose_downsample', type=int, default=60,
             help='Only use 1 in N views for density estimation, which tends to be computationally intense')
     parser.add_argument('--skip_unravel', action='store_true', help='Skip the generation of frames from a video')
@@ -156,6 +158,19 @@ def main():
         pedestrians_2d[:, 1]  = annotations[:,5]
         pedestrians_2d[:, 2:6]  = annotations[:, 1:5]
         # all_frame_ids = np.sort(np.unique(pedestrian_2d[:, 1]))
+
+    if args.combined != None:
+        pedestrians_2d = helpers.deserial_combined_out(args.combined)
+    # PT = PeopleTracker(frame_paths_sorted, predictions_path, export_as='viz')
+    # pedestrians_2d = PT.track()
+    # pedestrians_2d = np.zeros((300, 6))
+    # pedestrians_2d[:, 0] = 1
+    # pedestrians_2d[:, 1] = np.arange(300)
+    # pedestrians_2d[:, 2] = 2192
+    # pedestrians_2d[:, 3] = 436
+    # pedestrians_2d[:, 4] = 2340
+    # pedestrians_2d[:, 5] = 576
+    print(pedestrians_2d)
 
     # Create a space to work in the temporary filesystem
     basename, ext = os.path.splitext(os.path.basename(args.video))
@@ -202,8 +217,7 @@ def main():
 
     fid_to_pid_map = helpers.get_frame_id_to_pose_id_map(sfm_json)
     for frame_id, pose_id in fid_to_pid_map:
-        drone_data_avail[frame_id] = 1
-        drone_pose[frame_id], drone_rot[frame_id] = helpers.get_camera_pose_from_sfm_data(sfm_json, pose_id)
+        drone_data_avail[frame_id], drone_pose[frame_id], drone_rot[frame_id] = helpers.get_camera_pose_from_sfm_data(sfm_json, pose_id)
 
 
     # Extrapolate drone position.
@@ -215,7 +229,7 @@ def main():
     prev_pose = None
     prev_rot_eul = None
     cur_idx = -1
-    cur_pos = None
+    cur_pose = None
     cur_rot_eul = None
     for i, avail in enumerate(drone_data_avail):
         if avail:
@@ -275,18 +289,31 @@ def main():
     pp = pedestrians_pose.copy()
     idx = np.lexsort((pp[:,1], pp[:,0])) # sorty by p_id, then by frame_id
     pp = pp[idx]
-    pp_next = np.zeros((len(pp) + 1, 5))
-    pp_next[0:] = pp[1:]
+    pp_next = np.zeros((len(pp), 5))
+    pp_next[0:len(pp_next)-1] = pp[1:]
     pp_next[len(pp_next) - 1, 0] = np.inf # ensure will not be used
     pp_dt_pid = pp_next[:, 1] - pp[:, 1]
     pp_dt_fid = pp_next[:, 0] - pp[:, 0]
-    pp_dt_pos = pp_next[: 2:] - pp[:, 2:]
+    pp_dt_pos = pp_next[:, 2:] - pp[:, 2:]
+
+    # print(pp_dt_pos.shape)
+    # print(pp_dt_fid.shape)
+    # print(pp[:, 2:].shape)
+
+    # print((pp_dt_fid / frame_rate))
+
     # pp_dt_pid == 0 => same pedestrian
     # pp_dt_fid > MAX_FRAME_DELTA => timely data
-    pp[:, 2:] = pp_dt_pos / (pp_dt_fid / frame_rate) # v = dx / dt
-    pp[pp[pp_dt_pid != 0], 2:] = 0
-    pp[pp[pp_dt_fid< 0], 2:] = 0
-    pp[pp[pp_dt_fid > MAX_FRAME_DELTA], 2:] = 0
+    div = (pp_dt_fid / frame_rate)
+    pp_dt_pos[:, 0] = pp_dt_pos[:, 0] / div
+    pp_dt_pos[:, 1] = pp_dt_pos[:, 1] / div
+    pp_dt_pos[:, 2] = pp_dt_pos[:, 2] / div
+    # pp[:, 2:] = pp_dt_pos / (pp_dt_fid / frame_rate) # v = dx / dt
+    pp[:, 2:] = pp_dt_pos
+
+    pp[pp_dt_pid != 0, 2:] = 0
+    pp[pp_dt_fid < 0, 2:] = 0
+    pp[pp_dt_fid > MAX_FRAME_DELTA, 2:] = 0
     pedestrians_vel = pp
 
     # Calculate epicenters
@@ -297,6 +324,10 @@ def main():
 
     # Serialize the output
     helpers.serial_safetynet_out(out_dir, frame_num,
+            drone_pose, drone_rot,
+            pedestrians_pose, pedestrians_vel,
+            K, frame_rate)
+    helpers.pickle_safetynet_out(out_dir, frame_num,
             drone_pose, drone_rot,
             pedestrians_pose, pedestrians_vel,
             K, frame_rate)

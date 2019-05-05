@@ -3,6 +3,7 @@ import math
 import json
 from plyfile import PlyData, PlyElement
 import os
+import pickle
 
 def get_camera_intrinsic_from_sfm_data(sfm_json):
     """
@@ -68,8 +69,9 @@ def get_camera_pose_from_sfm_data(sfm_json, pose_id):
     poses = sfm_json['extrinsics']
     for p in poses:
         if p['key'] == pose_id:
-            return (np.asarray(p['value']['center']), np.asarray(p['value']['rotation']))
-    assert False, 'Unable to discover pose_id {}'.format(pose_id)
+            return (True, np.asarray(p['value']['center']), np.asarray(p['value']['rotation']))
+    # Can fail, if view didn't achieve enough keypoints
+    return False, np.zeros(3), np.zeros((3,3))
 
 # http://cvrs.whu.edu.cn/downloads/ebooks/Multiple%20View%20Geometry%20in%20Computer%20Vision%20(Second%20Edition).pdf
 # pg 155
@@ -263,8 +265,7 @@ class NumpyEncoder(json.JSONEncoder):
 def deserial_safetynet_out(file):
     js = None
     with open(file, 'w') as f:
-        # io = StringIO('["streaming API"]')
-        js = json.loads(f)
+        js = json.load(f)
 
     scale = js['scale']
     timedelta = js['timedelta']
@@ -328,39 +329,48 @@ def deserial_safetynet_out(file):
 
 def deserial_combined_out(file):
     with open(file, 'r') as f:
-        js = json.loads(f)
-    people = data['people']
+        js = json.load(f)
+    people = js['people']
 
     pedestrians_2d = []
     for person in people:
-        id = persion['id']
-        for pos in persion['pos']:
+        id = person['id']
+        for pos in person['pos']:
             p = [0] * 6
-            p[0] = id
-            p[1] = pos['frame_id']
-            p[2:6] = pos['box']
+            p[0] = int(id)
+            # p[1] = pos['frame_id']
+            p[1] = int(pos['frame_id'].split('_')[-1]) # hack, shouldn't have stored like this
+            # p[2:6] = int(pos['box'])
+            p[2] = int(pos['box'][0])
+            p[3] = int(pos['box'][1])
+            p[4] = int(pos['box'][2])
+            p[5] = int(pos['box'][3])
             pedestrians_2d.append(p)
     return np.asarray(pedestrians_2d)
 
-def deserial_safetynet_out(file):
-    with open(file, 'r') as f:
+
+def pickle_safetynet_in(file):
+    with open(file, 'rb') as f:
         frame_num = pickle.load(f)
         drone_pose = pickle.load(f)
         drone_rot = pickle.load(f)
+        K = pickle.load(f)
         pedestrians_pose = pickle.load(f)
         pedestrians_vel = pickle.load(f)
         frame_rate = pickle.load(f)
         return (frame_num, drone_pose, drone_rot, K, pedestrians_pose, pedestrians_vel, frame_rate)
 
-def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_pose, pedestrians_vel, K, frame_rate):
-    with open(os.path.join(out_dir, 'safetynet.json'), 'w') as f:
+
+def pickle_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_pose, pedestrians_vel, K, frame_rate):
+    with open(os.path.join(out_dir, 'safetynet.pickle'), 'wb') as f:
         pickle.dump(frame_num, f)
         pickle.dump(drone_pose, f)
         pickle.dump(drone_rot, f)
         pickle.dump(K, f)
         pickle.dump(pedestrians_pose, f)
         pickle.dump(pedestrians_vel, f)
-        # pickle.dump(drone_pose, f)
+        pickle.dump(frame_rate, f)
+
 
 def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_pose, pedestrians_vel, K, frame_rate):
     frames = []
@@ -373,11 +383,14 @@ def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_
         # Get pedestrian data
         pedestrians = []
         for pdata in pedestrians_pose[pedestrians_pose[:, 0] == frame_id]:
+            pv = pedestrians_vel[pedestrians_vel[:,1] == pdata[1]]
+            pv = pv[pv[:,0] == frame_id]
             p = {
                 "id" : pdata[1],
                 "pose" : pdata[2:5],
+                # "vel" : pv[2:5],
                 # "vel" : pdata[5:8]
-                "vel" : np.zeros(3)  # TODO - placeholder
+                "vel" : np.asarray([1, 0, 0])  # TODO - placeholder
             }
             pedestrians.append(p)
         # Assemble frame
@@ -394,10 +407,10 @@ def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_
     data['timedelta'] = 1 / frame_rate
     data['K'] = K
     data['frames'] = frames
-    data_dump = json.dumps(data, cls=NumpyEncoder, indent=4)
-    print(data_dump)
+    # data_dump = json.dumps(data, cls=NumpyEncoder, indent=4)
+    # print(data_dump)
     with open(os.path.join(out_dir, 'safetynet.json'), 'w') as f:
-        json.dump(data_dump, f)
+        json.dump(data, f, indent=4, cls=NumpyEncoder)
 
 
 # From https://www.learnopencv.com/rotation-matrix-to-euler-angles/
