@@ -59,13 +59,13 @@ def process_frame(img, frame_id, bounding_boxes, K, R, C, ppos, pvel, scale, fps
         # print(K)
         # print(R)
         # print(C)
-        p1 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + C)
+        p1 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6])
 
         # print(ppos[i])
         # print('....')
         # print(p1)
 
-        p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + np.array([3, 0, 0]) + C)
+        p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + np.array([3, 0, 0]))
         # print('{}'.format(np.linalg.norm(pvel[:, 2:6])))
 
         # p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + pvel[i, 2:6] - C)
