@@ -196,13 +196,48 @@ plt.scatter(p2[:,0], p2[:,1], p2[:,2]), plt.show()
 
 """
 
+# Based on this derivation
+# http://cal.cs.illinois.edu/~johannes/research/LS_line_intersect.pdf
+def least_square_line_intersect(A, B, c):
+    """
+    Finds the least-square-fit intersection of K lines in N-dimensional
+    space with lines described as a point A and a vector from that
+    point N to another point B.
+    @param A        numpy KxN array
+    @param B        numpy KxN array
+    @param c        numpy 1xK cost
+    @return         numpy 1xN array
+    """
+    K = A.shape[0]
+    N = A.shape[1]
+    # Rp = q
+    # R = c * (np.eyes(K) - np.matmul(B, B.T)) # KxK
+    # q = np.matmul(c * (np.eyes(K) - np.matmul(B, B.T)), A) # KxN
 
+    R = np.zeros((N, N))
+    q = np.zeros((N, 1))
+    for i in range(K):
+        R += c[i] * ( np.eye(N) - np.matmul( np.matrix(B[i]).T, np.matrix(B[i]) ) )
+        # test = np.matmul((np.eye(N) - np.matmul(np.matrix(B[i]).T, np.matrix(B[i]))), np.matrix(A[i]).T)
+        # print((np.eye(N) - np.matmul(B[i].T, B[i])).shape)
+        # print(A.shape)
+        # print(np.matrix(A[i]).shape)
+        # print(np.matrix(A[i]).T.shape)
+        # print(test.shape)
+        # print(np.matmul((np.eye(N) - np.matmul(B[i].T, B[i])), A[i].T))
+        # print(c[i])
+        # print(c[i] * np.matmul((np.eye(N) - np.matmul(B[i].T, B[i])), A[i].T))
+        # print(q)
+        q += c[i] * np.matmul((np.eye(N) - np.matmul(np.matrix(B[i]).T, np.matrix(B[i]))), np.matrix(A[i]).T)
 
-def collate_pedestrians(pedestrians_prev, bounding_boxes):
-    pass
+    # R = c * (np.eyes(K) - np.matmul(B, B.T)) # KxK
+    # q = np.matmul(c * (np.eyes(K) - np.matmul(B, B.T)), A) # KxN
 
-def classify_pedestrian(pedestrian_vel_abs):
-    pass
+    # Moore pseudo-inverse
+    Rt = np.matmul(R.T, np.linalg.inv(np.matmul(R, R.T)))
+    # print(q)
+    return np.matmul(Rt, q)
+
 
 def estimate_epicenter(epicenter_prev, pedestrian_class, pedestrian_pos, pedestrian_vel_abs):
     pass
@@ -223,7 +258,110 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.tolist()
         return json.JSONEncoder.default(self, obj)
 
-        
+# from io import StringIO
+# io = StringIO('["streaming API"]')
+def deserial_safetynet_out(file):
+    js = None
+    with open(file, 'w') as f:
+        # io = StringIO('["streaming API"]')
+        js = json.loads(f)
+
+    scale = js['scale']
+    timedelta = js['timedelta']
+    K = js['K']
+    frames = js['frames']
+
+    frame_num = len(frames)
+
+    drone_pose = np.zeros((frame_num, 3))
+    drone_rot = np.zeros((frame_num, 3, 3))
+    pedestrians_pose = []
+    pedestrians_vel = []
+
+    for i in range(frame_num):
+        frame_id = frames[i]['frame_id']
+
+        drone_pose[frame_id] = frames[i]['drone']['pose']
+        drone_rot[frame_id] = frames[i]['drone']['R']
+        # drone_rot[frame_id] = frames[i]['drone']['vel']
+
+        # TODO -epicenter
+        pedestrians = frames[i]['pedestrians']
+        for p in pedestrians:
+            pedestrians_pose.append([frame_id, p['id'], p['pose']])
+            pedestrians_vel.append([frame_id, p['id'], p['vel']])
+
+
+
+
+
+
+
+    # frames = []
+    # for frame_id in range(frame_num):
+    #     drone = {
+    #         "pose" : drone_pose[frame_id],
+    #         "R" : drone_rot[frame_id],
+    #         "vel" : np.zeros(3) # TODO - placeholder
+    #     }
+    #     # Get pedestrian data
+    #     pedestrians = []
+    #     for pdata in pedestrians_pose[pedestrians_pose[:, 0] == frame_id]:
+    #         p = {
+    #             "id" : pdata[1],
+    #             "pose" : pdata[2:5],
+    #             # "vel" : pdata[5:8]
+    #             "vel" : np.zeros(3)  # TODO - placeholder
+    #         }
+    #         pedestrians.append(p)
+    #     # Assemble frame
+    #     frame = {
+    #         "frame_id" : frame_id,
+    #         "drone" : drone,
+    #         "epicenter" : np.zeros(3),
+    #         "pedestrians": pedestrians
+    #     }
+    #     frames.append(frame)
+ 
+    return (frame_num, drone_pose, drone_rot, pedestrians_pose, pedestrians_vel, K, frame_rate)
+
+
+def deserial_combined_out(file):
+    with open(file, 'r') as f:
+        js = json.loads(f)
+    people = data['people']
+
+    pedestrians_2d = []
+    for person in people:
+        id = persion['id']
+        for pos in persion['pos']:
+            p = [0] * 6
+            p[0] = id
+            p[1] = pos['frame_id']
+            p[2:6] = pos['box']
+            pedestrians_2d.append(p)
+    return np.asarray(pedestrians_2d)
+
+def deserial_safetynet_out(file):
+    with open(file, 'r') as f:
+        frame_num = pickle.load(f)
+        drone_pose = pickle.load(f)
+        drone_rot = pickle.load(f)
+        pedestrians_pose = pickle.load(f)
+        pedestrians_vel = pickle.load(f)
+        frame_rate = pickle.load(f)
+        return (frame_num, drone_pose, drone_rot, K, pedestrians_pose, pedestrians_vel, frame_rate)
+
+def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_pose, pedestrians_vel, K, frame_rate):
+    with open(os.path.join(out_dir, 'safetynet.json'), 'w') as f:
+        pickle.dump(frame_num, f)
+        pickle.dump(drone_pose, f)
+        pickle.dump(drone_rot, f)
+        pickle.dump(K, f)
+        pickle.dump(pedestrians_pose, f)
+        pickle.dump(pedestrians_vel, f)
+        # pickle.dump(drone_pose, f)
+
 def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_pose, pedestrians_vel, K, frame_rate):
     frames = []
     for frame_id in range(frame_num):
