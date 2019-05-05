@@ -50,8 +50,8 @@ def process_video_frames(vidcap, out_dir, basename, frame_skip=60):
         if not success or frame_cur is None:
             break
         # cut short
-        if frame_num > 60:
-            break
+        # if frame_num > 5:
+        #     break
 
     return frame_num
 
@@ -165,7 +165,7 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
 
     # Turn the video into a sequence of images
-    frame_num, img_dir = unravel_video(args.video, out_dir, frame_skip=1, skip=args.skip_unravel)
+    frame_num, img_dir = unravel_video(args.video, out_dir, frame_skip=60, skip=args.skip_unravel)
 
     # Run the openMVG pipeline.
     sfm_bin_filename, sfm_data_filename = pose_estimation(img_dir, out_dir, skip=args.skip_pose)
@@ -193,7 +193,7 @@ def main():
 
     # Make sure everything works. Annotated data sometimes seems to
     # extend beyond the end of the video
-    frame_num = max(frame_num, int(np.max(pedestrians_2d[:,1])) + 1) 
+    # frame_num = max(frame_num, int(np.max(pedestrians_2d[:,1])) + 1) 
 
     # drone_data_avail, drone_pose, and drone_rot are all indexed by frame number
     drone_data_avail = np.zeros(frame_num)
