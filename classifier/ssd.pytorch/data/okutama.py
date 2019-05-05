@@ -16,7 +16,10 @@ from pdb import set_trace as bp
 
 OKUTAMA_CLASSES = ('pedestrian') # always index 0 
 
-OKUTAMA_ROOT = '/data/jhtlab/msnower/okutama_dataset/Train-Set/'
+OKUTAMA_ROOT = '/data/jhtlab/msnower/okutama_all_splits/'
+
+MIN_DIM = 300
+ASPECT_RATIO = 16 / 9.
 
 
 class OkutamaAnnotationTransform(object):
@@ -39,16 +42,13 @@ class OkutamaAnnotationTransform(object):
         Returns:
             a list containing lists of bounding boxes  [bbox coords, class name]
         """
-        # divide by extra scale lables are in 4k and images are lower res
-        extra_scale = 3840. / width
 
         res = []
         scale = np.array([width, height, width, height])
         for t in target:
             bbox = np.asarray(t[:4], np.int32)
-            bbox = bbox / extra_scale
             scaled = list(bbox / scale)
-            scaled.append(t[4])
+            scaled.append(0)
             res.append(scaled)
 
         return res # [[xmin, ymin, xmax, ymax, label_ind], ... ]
@@ -73,12 +73,17 @@ class OkutamaDetection(data.Dataset):
 
     def __init__(
         self, dataset_root, transform=None,
-        target_transform=OkutamaAnnotationTransform(), name='okutama'):
+        target_transform=OkutamaAnnotationTransform(), train=True,
+        name='okutama'):
 
-        self.dataset_root = dataset_root
+        if train:
+            self.dataset_root = os.path.join(dataset_root, 'Train-Set')
+        else:
+            self.dataset_root = os.path.join(dataset_root, 'Test-Set')
+        
         self.name = name
-        self.imgs_root = dataset_root
-        self.labels_root = osp.join(dataset_root, 'Labels', 'MultiActionLabels', '3840x2160')
+        self.imgs_root = self.dataset_root
+        self.labels_root = osp.join(self.dataset_root, 'Labels', 'MultiActionLabels', '3840x2160')
 
         print('creating dataset ids')
 
@@ -92,45 +97,34 @@ class OkutamaDetection(data.Dataset):
                 for vid_dir in os.listdir(cur_time_dir):
                     cur_vid_dir = os.path.join(cur_time_dir, vid_dir)
                     frame_paths = glob(os.path.join(cur_vid_dir, '*.jpg'))
-
-                    def _get_frame_labels(vd):
-                        p_ = [lp for lp in os.listdir(self.labels_root) \
-                              if '.'.join(lp.split('.')[:3]) == vd][0]
-                        p = os.path.join(self.labels_root, p_)
-
-                        lines = [l.strip().split(' ')[:9] for l in open(p)]
-                        lines = np.asarray(lines, dtype=np.int32)
-                        num_frames = np.max(lines[:, 5])
-                        fls = [[] for _ in range(num_frames + 1)]
-                        for line in lines:
-                            frame_num = line[5]
-                            # ignore annotations where the human is lost
-                            if line[7] == 1 or line[8] == 1:
-                                continue
-                            else:
-                                # get bbox coords and add 0 for label
-                                fls[frame_num].append(line.tolist()[1:5] + [0])
-                        return fls
-
-                    frame_labels = _get_frame_labels(vid_dir)
-                    frame_paths.sort(key=lambda p: int(p.split('/')[-1].split('.')[0]))
-                    
-                    # remove extraneous frames at the end of the dataset with no people
-                    if len(frame_labels) < len(frame_paths):
-                        frame_paths = frame_paths[:len(frame_labels)]
-
-                    for (f_p, f_l) in zip(frame_paths, frame_labels):
-                        # skip frames with no people (and thus have no label)
-                        f_l_ = np.asarray(f_l)
-                        if len(f_l_.shape) < 2:
-                            continue
-
-                        self.ids.append((f_p, f_l))
+                    frame_labels = self._get_frame_labels(vid_dir)
+                    for f_p in frame_paths:
+                        frame_index = f_p.split('/')[-1].split('.')[0]
+                        self.ids.append((f_p, frame_labels[frame_index]))
 
         print('created dataset with {} ids'.format(len(self.ids)))
 
         self.transform = transform
         self.target_transform = target_transform
+
+    def _get_frame_labels(self, vd):
+        p_ = [lp for lp in os.listdir(self.labels_root) \
+              if '.'.join(lp.split('.')[:3]) == vd][0]
+        p = os.path.join(self.labels_root, p_)
+
+        lines = [l.strip().split(' ') for l in open(p)]
+        fls = {}
+        for line in lines:
+            bbox = line[:4] + [0] # add 1 for the label
+            bbox = [int(float(num)) for num in bbox]
+            frame_index = line[4]
+            if frame_index not in fls:
+                fls[frame_index] = list()
+                fls[frame_index].append(bbox)
+            else:
+                fls[frame_index].append(bbox)
+
+        return fls
 
     def __getitem__(self, index):
         im, gt, h, w, img_orig, target_orig = self.pull_item(index)
@@ -143,12 +137,9 @@ class OkutamaDetection(data.Dataset):
     def pull_item(self, index):
         f_p, f_l = self.ids[index]
 
-        min_dim = 300
-        aspect_ratio = 16 / 9.
-
         target = f_l
         img = cv.imread(f_p)
-        img = cv.resize(img, (int(aspect_ratio * min_dim), min_dim))
+        #img = cv.resize(img, (int(ASPECT_RATIO * MIN_DIM), MIN_DIM))
         height, width, channels = img.shape
 
         img_orig = img.copy()
@@ -179,7 +170,11 @@ class OkutamaDetection(data.Dataset):
             PIL img
         '''
         f_p, _ = self.ids[index]
-        return cv2.imread(f_p)
+
+        img = cv.imread(f_p)
+        #img = cv.resize(img, (int(ASPECT_RATIO * MIN_DIM), MIN_DIM))
+
+        return img
 
     def pull_anno(self, index):
         '''Returns the original annotation of image at index
@@ -193,9 +188,13 @@ class OkutamaDetection(data.Dataset):
             list:  [img_id, [(label, bbox coords),...]]
                 eg: ('001718', [('dog', (96, 13, 438, 332))])
         '''
-        _, f_l = self.ids[index]
-        gt = self.target_transform(f_l, 1, 1) # CHNAGE THIS!!!!!!
-        return str(index), gt
+        f_p, f_l = self.ids[index]
+        #width, height = (int(ASPECT_RATIO * MIN_DIM), MIN_DIM)
+
+        anno = self.target_transform(f_l, 1, 1)
+        #anno = [ (np.asarray(t[:4]) / (3840. / width)).tolist() for t in f_l]
+
+        return f_p, anno
 
     def pull_tensor(self, index):
         '''Returns the original image at an index in tensor form
