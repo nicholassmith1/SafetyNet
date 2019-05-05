@@ -21,6 +21,12 @@ def visualize(video, combined, safetynet):
     cv2.VideoWriter_fourcc('M','J','P','G'), 10,
             (frame.shape[1],frame.shape[0]))
 
+    # Pre-filter velocity
+    pp = pedestrians_vel
+    pp = pp[np.invert(np.any(np.isnan(pp), axis=1))]
+    idx = np.lexsort((pp[:,0], pp[:,1])) # lexsort is weird (reversed params) sorty by p_id, then by frame_id
+    pp = pp[idx]
+
     frame_num = 0
     while success:
         frame_num = frame_num + 1
@@ -30,7 +36,8 @@ def visualize(video, combined, safetynet):
         fbb = bounding_boxes[bounding_boxes[:, 1] == frame_num]
         ppos = pedestrians_pose[pedestrians_pose[:, 0] == frame_num]
         pvel = pedestrians_vel[pedestrians_vel[:, 0] == frame_num]
-        out_frame = process_frame(frame, frame_num, fbb, K, drone_rot[frame_num], drone_pose[frame_num], ppos, pvel, 1.0, 29)
+        # TODO - make scale and framerate part of json
+        out_frame = process_frame(frame, frame_num, fbb, K, drone_rot[frame_num], drone_pose[frame_num], ppos, pvel, 7.198792, 10)
         out.write(out_frame)
 
         # Grab next frame
@@ -48,7 +55,9 @@ def process_frame(img, frame_id, bounding_boxes, K, R, C, ppos, pvel, scale, fps
         p2 = bounding_boxes[i, 4:6]
         # print(p1)
         # print(p2)
-        cv2.rectangle(img, (p1[0], p1[1]), (p2[0], p2[1]), (255, 0, 0), 2)
+        cv2.rectangle(img, (p1[0], p1[1]), (p2[0], p2[1]), (0, 255, 0), 2)
+
+    # print(pvel)
 
     # Draw position and velocity
     for i in range(len(ppos)):
@@ -65,10 +74,19 @@ def process_frame(img, frame_id, bounding_boxes, K, R, C, ppos, pvel, scale, fps
         # print('....')
         # print(p1)
 
-        p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + np.array([3, 0, 0]))
+        # p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + np.array([3, 0, 0]))
         # print('{}'.format(np.linalg.norm(pvel[:, 2:6])))
 
-        # p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + pvel[i, 2:6] - C)
+        # Find the corresponding instantenous velocity
+        v2 = pvel[pvel[:,1] == ppos[i, 1]]
+        if v2.size == 0:
+            v2 = np.zeros(5)
+        else:
+            v2 = v2[0]
+
+        # Point 2 is projected head by ptime seconds
+        ptime = 1.0
+        p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + (fps * ptime) * v2[2:6])
 
         if np.isnan(p1).any() or np.isnan(p1).any():
             print('Something strange happened')
@@ -77,17 +95,22 @@ def process_frame(img, frame_id, bounding_boxes, K, R, C, ppos, pvel, scale, fps
             print(p1), print(p2)
             continue
 
-        cv2.line(img, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), (255, 0, 0), 4)
+        cv2.arrowedLine(img, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), (255, 0, 0), 4)
 
         # Draw the instaneous magnitude
-        text = '{}'.format(ppos[i])
-        # text = '{:0.3f} m/s'.format(np.linalg.norm(pvel[i]) * scale)
-        cv2.putText(img, text, (int(p1[0]), int(p1[1])), cv2.FONT_HERSHEY_SIMPLEX,
+        # text = '{}'.format(ppos[i])
+        text = '({:0.3f}, {:0.3f}, {:0.3f})'.format(ppos[i, 2] * scale, ppos[i, 3] * scale, ppos[i, 4] * scale)
+        cv2.putText(img, text, (int(p1[0]) + 10, int(p1[1]) + 10), cv2.FONT_HERSHEY_SIMPLEX,
+                1.0, (255, 0, 0), 3, cv2.LINE_AA)
+        text = '{:0.3f} m/s'.format(np.linalg.norm(v2[2:6]) * scale)
+        cv2.putText(img, text, (int(p1[0]) + 10, int(p1[1]) + 40), cv2.FONT_HERSHEY_SIMPLEX,
                 1.0, (255, 0, 0), 3, cv2.LINE_AA)
 
+
     # Print the drone position
-    text = 'id={} ({:0.3f}, {:0.3f}, {:0.3f})'.format(frame_id, scale * C[0],
-            scale * C[1], scale * C[2])
+    # text = 'id={} ({:0.3f}, {:0.3f}, {:0.3f})'.format(frame_id, scale * C[0],
+    #         scale * C[1], scale * C[2])
+    text = 'id={} ({:0.3f}, {:0.3f}, {:0.3f})'.format(frame_id, C[0], C[1], C[2])
     # text = ''
     cv2.putText(img, text, (30, img.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX,
             3.0, (255, 0, 0), 4, cv2.LINE_AA)

@@ -82,6 +82,21 @@ def real_world_to_pixel(K, R, C, X):
     out = out / out[2]
     return out
 
+# Test code - real world to pixel broken?
+"""
+>>> X = np.array([0.26217, -0.25947, 0.91148])
+>>> C = np.array([0.1447, -0.39166, 0.24284])
+>>> R = np.array([[0.99832343, 0.05357055, -0.024284906], [-0.05534797, 0.9943409, -0.09067949], [0.01693913, 0.09174074, 0.99563884]])
+>>> K = np.array([[4699.8318, 0, 1885.765668], [0, 4699.83192, 1049.5404], [0, 0, 1]])
+>>> x_est = helpers.real_world_to_pixel(K, R, C, X)
+>>> x_est
+array([2.63319077e+03, 1.49411204e+03, 1.00000000e+00])
+>>> X_est = helpers.pixel_to_real_world(K, R, C, x_est[:2])
+>>> X_est
+array([-1.13542375, -1.27770209, -6.46283931])
+
+"""
+
 # # https://math.stackexchange.com/questions/2237994/back-projecting-pixel-to-3d-rays-in-world-coordinates-using-pseudoinverse-method?
 # def pixel_to_real_world(K, R, C, x):
 #     IC = np.c_[ np.identity(3), -C ]
@@ -339,7 +354,8 @@ def deserial_combined_out(file):
             p = [0] * 6
             p[0] = int(id)
             # p[1] = pos['frame_id']
-            p[1] = int(pos['frame_id'].split('_')[-1]) # hack, shouldn't have stored like this
+            # p[1] = int(pos['frame_id'].split('_')[-1]) # hack, shouldn't have stored like this --legacy support
+            p[1] = int(pos['frame_id']) 
             # p[2:6] = int(pos['box'])
             p[2] = int(pos['box'][0])
             p[3] = int(pos['box'][1])
@@ -385,12 +401,16 @@ def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_
         for pdata in pedestrians_pose[pedestrians_pose[:, 0] == frame_id]:
             pv = pedestrians_vel[pedestrians_vel[:,1] == pdata[1]]
             pv = pv[pv[:,0] == frame_id]
+            if pv.size == 0:
+                np.asarray([1, 0, 0])
+            else:
+                pv = pv[0]
             p = {
                 "id" : pdata[1],
                 "pose" : pdata[2:5],
-                # "vel" : pv[2:5],
+                "vel" : pv[2:5],
                 # "vel" : pdata[5:8]
-                "vel" : np.asarray([1, 0, 0])  # TODO - placeholder
+                # "vel" : np.asarray([1, 0, 0])  # TODO - placeholder
             }
             pedestrians.append(p)
         # Assemble frame

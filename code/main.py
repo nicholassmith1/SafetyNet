@@ -142,7 +142,8 @@ def main():
     # intr = np.array([[2246.742, 0.0     , 1920.0],
     #                  [0.0     , 2246.742, 1080.0],
     #                  [0.0     , 0.0     , 1.0   ]])
-    frame_rate = 29 # FPS
+    # frame_rate = 29 # FPS
+    frame_rate = 10 # FPS
 
 
     log.info('Processing video file: {}, annotations file: {}'.format(args.video, args.annotations))
@@ -289,7 +290,8 @@ def main():
     # pedestrians_vel = np.zeros((len(pedestrians_2d), 4)) # [frame_id, p_id, vx, vy, vz]
     MAX_FRAME_DELTA = 29
     pp = pedestrians_pose.copy()
-    idx = np.lexsort((pp[:,1], pp[:,0])) # sorty by p_id, then by frame_id
+    pp = pp[np.invert(np.any(np.isnan(pp), axis=1))]
+    idx = np.lexsort((pp[:,0], pp[:,1])) # lexsort is weird (reversed params) sorty by p_id, then by frame_id
     pp = pp[idx]
     pp_next = np.zeros((len(pp), 5))
     pp_next[0:len(pp_next)-1] = pp[1:]
@@ -297,6 +299,15 @@ def main():
     pp_dt_pid = pp_next[:, 1] - pp[:, 1]
     pp_dt_fid = pp_next[:, 0] - pp[:, 0]
     pp_dt_pos = pp_next[:, 2:] - pp[:, 2:]
+
+    # # second attempt
+    # pp = pedestrians_pose.copy()
+    # pp = pp[np.invert(np.any(np.isnan(pp), axis=1))]
+    # idx = np.lexsort((pp[:,0], pp[:,1])) # sorty by p_id, then by frame_id
+    # pp = pp[idx]
+    # pp_next = np.zeros((len(pp), 5))
+    # pp_next[0:-1] = pp[1:]
+    # pp_next[-1, 0] = np.inf # ensure will not be used
 
     # print(pp_dt_pos.shape)
     # print(pp_dt_fid.shape)
