@@ -180,7 +180,7 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
 
     # Turn the video into a sequence of images
-    frame_num, img_dir = unravel_video(args.video, out_dir, frame_skip=60, skip=args.skip_unravel)
+    frame_num, img_dir = unravel_video(args.video, out_dir, frame_skip=15, skip=args.skip_unravel)
 
     # Run the openMVG pipeline.
     sfm_bin_filename, sfm_data_filename = pose_estimation(img_dir, out_dir, skip=args.skip_pose)
@@ -219,6 +219,8 @@ def main():
     for frame_id, pose_id in fid_to_pid_map:
         drone_data_avail[frame_id], drone_pose[frame_id], drone_rot[frame_id] = helpers.get_camera_pose_from_sfm_data(sfm_json, pose_id)
 
+    # print(drone_pose[240])
+    # os.exit(1)
 
     # Extrapolate drone position.
     # Processing every single frame is prohibitively time consuming using
@@ -305,6 +307,10 @@ def main():
     # pp_dt_pid == 0 => same pedestrian
     # pp_dt_fid > MAX_FRAME_DELTA => timely data
     div = (pp_dt_fid / frame_rate)
+
+    print('div')
+    print(div)
+
     pp_dt_pos[:, 0] = pp_dt_pos[:, 0] / div
     pp_dt_pos[:, 1] = pp_dt_pos[:, 1] / div
     pp_dt_pos[:, 2] = pp_dt_pos[:, 2] / div

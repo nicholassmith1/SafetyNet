@@ -30,7 +30,7 @@ def visualize(video, combined, safetynet):
         fbb = bounding_boxes[bounding_boxes[:, 1] == frame_num]
         ppos = pedestrians_pose[pedestrians_pose[:, 0] == frame_num]
         pvel = pedestrians_vel[pedestrians_vel[:, 0] == frame_num]
-        out_frame = process_frame(frame, fbb, K, drone_rot[frame_num], drone_pose[frame_num], ppos, pvel, 1.0, 29)
+        out_frame = process_frame(frame, frame_num, fbb, K, drone_rot[frame_num], drone_pose[frame_num], ppos, pvel, 1.0, 29)
         out.write(out_frame)
 
         # Grab next frame
@@ -41,7 +41,7 @@ def visualize(video, combined, safetynet):
 
 
 
-def process_frame(img, bounding_boxes, K, R, C, ppos, pvel, scale, fps):
+def process_frame(img, frame_id, bounding_boxes, K, R, C, ppos, pvel, scale, fps):
     # Draw bounding boxes
     for i in range(len(bounding_boxes)):
         p1 = bounding_boxes[i, 2:4]
@@ -59,18 +59,20 @@ def process_frame(img, bounding_boxes, K, R, C, ppos, pvel, scale, fps):
         # print(K)
         # print(R)
         # print(C)
-        p1 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6])
+        p1 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + C)
 
         # print(ppos[i])
         # print('....')
         # print(p1)
 
-        p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + np.array([3, 0, 0]))
-        # p2 = helpers.real_world_to_pixel(K, R, C, ppos[i] + pvel[i])
+        p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + np.array([3, 0, 0]) + C)
+        # print('{}'.format(np.linalg.norm(pvel[:, 2:6])))
+
+        # p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + pvel[i, 2:6] - C)
 
         if np.isnan(p1).any() or np.isnan(p1).any():
             print('Something strange happened')
-            print(ppos)
+            print(ppos[i])
             print(C)
             print(p1), print(p2)
             continue
@@ -78,12 +80,13 @@ def process_frame(img, bounding_boxes, K, R, C, ppos, pvel, scale, fps):
         cv2.line(img, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), (255, 0, 0), 4)
 
         # Draw the instaneous magnitude
-        text = '{:0.3f} m/s'.format(np.linalg.norm(pvel) * scale)
+        text = '{}'.format(ppos[i])
+        # text = '{:0.3f} m/s'.format(np.linalg.norm(pvel[i]) * scale)
         cv2.putText(img, text, (int(p1[0]), int(p1[1])), cv2.FONT_HERSHEY_SIMPLEX,
-                2.0, (255, 0, 0), 4, cv2.LINE_AA)
+                1.0, (255, 0, 0), 3, cv2.LINE_AA)
 
     # Print the drone position
-    text = '({:0.3f}, {:0.3f}, {:0.3f})'.format(scale * C[0],
+    text = 'id={} ({:0.3f}, {:0.3f}, {:0.3f})'.format(frame_id, scale * C[0],
             scale * C[1], scale * C[2])
     # text = ''
     cv2.putText(img, text, (30, img.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX,
