@@ -5,9 +5,8 @@ import helpers
 import cv2
 import numpy as np
 
-
-def parse_safetynet(js):
-    pass
+def moving_average(data, N):
+    return np.convolve(data, np.ones((N,))/N, mode='same')
 
 def visualize(video, combined, safetynet):
     bounding_boxes = helpers.deserial_combined_out(combined)
@@ -24,8 +23,31 @@ def visualize(video, combined, safetynet):
     # Pre-filter velocity
     pp = pedestrians_vel
     pp = pp[np.invert(np.any(np.isnan(pp), axis=1))]
+    # for pid in np.unique(pp[:, 1])
     idx = np.lexsort((pp[:,0], pp[:,1])) # lexsort is weird (reversed params) sorty by p_id, then by frame_id
     pp = pp[idx]
+    last_pid = -1
+    last_idx = 0
+    i = 0
+    # Traverse a sorted (p_id prim, frame_id sec) list of velocities.
+    # Everytime  the p_id changes, run a filter on all elements since
+    # the last p_id change
+    while i < len(pp):
+        if last_pid != pp[i, 1]:
+            if last_pid != -1:
+                N = min(10, i - last_idx)
+                # print(pp[last_idx:i, 2])
+                # print( moving_average(pp[last_idx:i, 2], N))
+                pp[last_idx:i, 2] = moving_average(pp[last_idx:i, 2], N)
+                pp[last_idx:i, 3] = moving_average(pp[last_idx:i, 3], N)
+                pp[last_idx:i, 4] = moving_average(pp[last_idx:i, 4], N)
+                # Zero the last 10 to compensate for bounding box interpolation issues
+                zz = max(last_idx, i - 10)
+                pp[zz:i, 2:6] = 0
+            last_pid = pp[i, 1]
+            last_idx = i
+        i = i + 1
+    pedestrians_vel = pp
 
     frame_num = 0
     while success:
@@ -85,7 +107,7 @@ def process_frame(img, frame_id, bounding_boxes, K, R, C, ppos, pvel, scale, fps
             v2 = v2[0]
 
         # Point 2 is projected head by ptime seconds
-        ptime = 1.0
+        ptime = 0.25
         p2 = helpers.real_world_to_pixel(K, R, C, ppos[i, 2:6] + (fps * ptime) * v2[2:6])
 
         if np.isnan(p1).any() or np.isnan(p1).any():
