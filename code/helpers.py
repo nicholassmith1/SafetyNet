@@ -3,6 +3,7 @@ import math
 import json
 from plyfile import PlyData, PlyElement
 import os
+import pickle
 
 def get_camera_intrinsic_from_sfm_data(sfm_json):
     """
@@ -68,8 +69,9 @@ def get_camera_pose_from_sfm_data(sfm_json, pose_id):
     poses = sfm_json['extrinsics']
     for p in poses:
         if p['key'] == pose_id:
-            return (np.asarray(p['value']['center']), np.asarray(p['value']['rotation']))
-    assert False, 'Unable to discover pose_id {}'.format(pose_id)
+            return (True, np.asarray(p['value']['center']), np.asarray(p['value']['rotation']))
+    # Can fail, if view didn't achieve enough keypoints
+    return False, np.zeros(3), np.zeros((3,3))
 
 # http://cvrs.whu.edu.cn/downloads/ebooks/Multiple%20View%20Geometry%20in%20Computer%20Vision%20(Second%20Edition).pdf
 # pg 155
@@ -79,6 +81,21 @@ def real_world_to_pixel(K, R, C, X):
     out = np.matmul(np.matmul(np.matmul(K, R), IC), XX.T)
     out = out / out[2]
     return out
+
+# Test code - real world to pixel broken?
+"""
+>>> X = np.array([0.26217, -0.25947, 0.91148])
+>>> C = np.array([0.1447, -0.39166, 0.24284])
+>>> R = np.array([[0.99832343, 0.05357055, -0.024284906], [-0.05534797, 0.9943409, -0.09067949], [0.01693913, 0.09174074, 0.99563884]])
+>>> K = np.array([[4699.8318, 0, 1885.765668], [0, 4699.83192, 1049.5404], [0, 0, 1]])
+>>> x_est = helpers.real_world_to_pixel(K, R, C, X)
+>>> x_est
+array([2.63319077e+03, 1.49411204e+03, 1.00000000e+00])
+>>> X_est = helpers.pixel_to_real_world(K, R, C, x_est[:2])
+>>> X_est
+array([-1.13542375, -1.27770209, -6.46283931])
+
+"""
 
 # # https://math.stackexchange.com/questions/2237994/back-projecting-pixel-to-3d-rays-in-world-coordinates-using-pseudoinverse-method?
 # def pixel_to_real_world(K, R, C, x):
@@ -196,13 +213,48 @@ plt.scatter(p2[:,0], p2[:,1], p2[:,2]), plt.show()
 
 """
 
+# Based on this derivation
+# http://cal.cs.illinois.edu/~johannes/research/LS_line_intersect.pdf
+def least_square_line_intersect(A, B, c):
+    """
+    Finds the least-square-fit intersection of K lines in N-dimensional
+    space with lines described as a point A and a vector from that
+    point N to another point B.
+    @param A        numpy KxN array
+    @param B        numpy KxN array
+    @param c        numpy 1xK cost
+    @return         numpy 1xN array
+    """
+    K = A.shape[0]
+    N = A.shape[1]
+    # Rp = q
+    # R = c * (np.eyes(K) - np.matmul(B, B.T)) # KxK
+    # q = np.matmul(c * (np.eyes(K) - np.matmul(B, B.T)), A) # KxN
 
+    R = np.zeros((N, N))
+    q = np.zeros((N, 1))
+    for i in range(K):
+        R += c[i] * ( np.eye(N) - np.matmul( np.matrix(B[i]).T, np.matrix(B[i]) ) )
+        # test = np.matmul((np.eye(N) - np.matmul(np.matrix(B[i]).T, np.matrix(B[i]))), np.matrix(A[i]).T)
+        # print((np.eye(N) - np.matmul(B[i].T, B[i])).shape)
+        # print(A.shape)
+        # print(np.matrix(A[i]).shape)
+        # print(np.matrix(A[i]).T.shape)
+        # print(test.shape)
+        # print(np.matmul((np.eye(N) - np.matmul(B[i].T, B[i])), A[i].T))
+        # print(c[i])
+        # print(c[i] * np.matmul((np.eye(N) - np.matmul(B[i].T, B[i])), A[i].T))
+        # print(q)
+        q += c[i] * np.matmul((np.eye(N) - np.matmul(np.matrix(B[i]).T, np.matrix(B[i]))), np.matrix(A[i]).T)
 
-def collate_pedestrians(pedestrians_prev, bounding_boxes):
-    pass
+    # R = c * (np.eyes(K) - np.matmul(B, B.T)) # KxK
+    # q = np.matmul(c * (np.eyes(K) - np.matmul(B, B.T)), A) # KxN
 
-def classify_pedestrian(pedestrian_vel_abs):
-    pass
+    # Moore pseudo-inverse
+    Rt = np.matmul(R.T, np.linalg.inv(np.matmul(R, R.T)))
+    # print(q)
+    return np.matmul(Rt, q)
+
 
 def estimate_epicenter(epicenter_prev, pedestrian_class, pedestrian_pos, pedestrian_vel_abs):
     pass
@@ -223,7 +275,119 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.tolist()
         return json.JSONEncoder.default(self, obj)
 
-        
+# from io import StringIO
+# io = StringIO('["streaming API"]')
+def deserial_safetynet_out(file):
+    js = None
+    with open(file, 'w') as f:
+        js = json.load(f)
+
+    scale = js['scale']
+    timedelta = js['timedelta']
+    K = js['K']
+    frames = js['frames']
+
+    frame_num = len(frames)
+
+    drone_pose = np.zeros((frame_num, 3))
+    drone_rot = np.zeros((frame_num, 3, 3))
+    pedestrians_pose = []
+    pedestrians_vel = []
+
+    for i in range(frame_num):
+        frame_id = frames[i]['frame_id']
+
+        drone_pose[frame_id] = frames[i]['drone']['pose']
+        drone_rot[frame_id] = frames[i]['drone']['R']
+        # drone_rot[frame_id] = frames[i]['drone']['vel']
+
+        # TODO -epicenter
+        pedestrians = frames[i]['pedestrians']
+        for p in pedestrians:
+            pedestrians_pose.append([frame_id, p['id'], p['pose']])
+            pedestrians_vel.append([frame_id, p['id'], p['vel']])
+
+
+
+
+
+
+
+    # frames = []
+    # for frame_id in range(frame_num):
+    #     drone = {
+    #         "pose" : drone_pose[frame_id],
+    #         "R" : drone_rot[frame_id],
+    #         "vel" : np.zeros(3) # TODO - placeholder
+    #     }
+    #     # Get pedestrian data
+    #     pedestrians = []
+    #     for pdata in pedestrians_pose[pedestrians_pose[:, 0] == frame_id]:
+    #         p = {
+    #             "id" : pdata[1],
+    #             "pose" : pdata[2:5],
+    #             # "vel" : pdata[5:8]
+    #             "vel" : np.zeros(3)  # TODO - placeholder
+    #         }
+    #         pedestrians.append(p)
+    #     # Assemble frame
+    #     frame = {
+    #         "frame_id" : frame_id,
+    #         "drone" : drone,
+    #         "epicenter" : np.zeros(3),
+    #         "pedestrians": pedestrians
+    #     }
+    #     frames.append(frame)
+ 
+    return (frame_num, drone_pose, drone_rot, pedestrians_pose, pedestrians_vel, K, frame_rate)
+
+
+def deserial_combined_out(file):
+    with open(file, 'r') as f:
+        js = json.load(f)
+    people = js['people']
+
+    pedestrians_2d = []
+    for person in people:
+        id = person['id']
+        for pos in person['pos']:
+            p = [0] * 6
+            p[0] = int(id)
+            # p[1] = pos['frame_id']
+            # p[1] = int(pos['frame_id'].split('_')[-1]) # hack, shouldn't have stored like this --legacy support
+            p[1] = int(pos['frame_id']) 
+            # p[2:6] = int(pos['box'])
+            p[2] = int(pos['box'][0])
+            p[3] = int(pos['box'][1])
+            p[4] = int(pos['box'][2])
+            p[5] = int(pos['box'][3])
+            pedestrians_2d.append(p)
+    return np.asarray(pedestrians_2d)
+
+
+def pickle_safetynet_in(file):
+    with open(file, 'rb') as f:
+        frame_num = pickle.load(f)
+        drone_pose = pickle.load(f)
+        drone_rot = pickle.load(f)
+        K = pickle.load(f)
+        pedestrians_pose = pickle.load(f)
+        pedestrians_vel = pickle.load(f)
+        frame_rate = pickle.load(f)
+        return (frame_num, drone_pose, drone_rot, K, pedestrians_pose, pedestrians_vel, frame_rate)
+
+
+def pickle_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_pose, pedestrians_vel, K, frame_rate):
+    with open(os.path.join(out_dir, 'safetynet.pickle'), 'wb') as f:
+        pickle.dump(frame_num, f)
+        pickle.dump(drone_pose, f)
+        pickle.dump(drone_rot, f)
+        pickle.dump(K, f)
+        pickle.dump(pedestrians_pose, f)
+        pickle.dump(pedestrians_vel, f)
+        pickle.dump(frame_rate, f)
+
+
 def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_pose, pedestrians_vel, K, frame_rate):
     frames = []
     for frame_id in range(frame_num):
@@ -235,11 +399,18 @@ def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_
         # Get pedestrian data
         pedestrians = []
         for pdata in pedestrians_pose[pedestrians_pose[:, 0] == frame_id]:
+            pv = pedestrians_vel[pedestrians_vel[:,1] == pdata[1]]
+            pv = pv[pv[:,0] == frame_id]
+            if pv.size == 0:
+                np.asarray([1, 0, 0])
+            else:
+                pv = pv[0]
             p = {
                 "id" : pdata[1],
                 "pose" : pdata[2:5],
+                "vel" : pv[2:5],
                 # "vel" : pdata[5:8]
-                "vel" : np.zeros(3)  # TODO - placeholder
+                # "vel" : np.asarray([1, 0, 0])  # TODO - placeholder
             }
             pedestrians.append(p)
         # Assemble frame
@@ -256,10 +427,10 @@ def serial_safetynet_out(out_dir, frame_num, drone_pose, drone_rot, pedestrians_
     data['timedelta'] = 1 / frame_rate
     data['K'] = K
     data['frames'] = frames
-    data_dump = json.dumps(data, cls=NumpyEncoder, indent=4)
-    print(data_dump)
+    # data_dump = json.dumps(data, cls=NumpyEncoder, indent=4)
+    # print(data_dump)
     with open(os.path.join(out_dir, 'safetynet.json'), 'w') as f:
-        json.dump(data_dump, f)
+        json.dump(data, f, indent=4, cls=NumpyEncoder)
 
 
 # From https://www.learnopencv.com/rotation-matrix-to-euler-angles/

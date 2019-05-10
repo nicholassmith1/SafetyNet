@@ -315,6 +315,8 @@ if __name__ == '__main__':
     predictions_path = os.path.join(frames_dir, 'combined.txt')
     PT = PeopleTracker(frame_paths_sorted, predictions_path, export_as=EXPORT_AS)
     people = PT.track()
+    print(people.shape)
+    print(people.shape)
 
     if viz:
         n = len(people)

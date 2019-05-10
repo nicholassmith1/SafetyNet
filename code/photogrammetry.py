@@ -87,6 +87,6 @@ def bounding_box_to_world_coord(K, R, C, bounding_box, point_cloud):
     # FIXME? For the moment, just calculate based on average of
     # surrounding groud
 
-
-    return np.mean(point_cloud[inner_pts], axis=0)
+    # Return to global F.O.R.
+    return np.mean(point_cloud[inner_pts] + C, axis=0)
     
