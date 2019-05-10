@@ -1,6 +1,8 @@
 **/__pycache__
 **/*.pyc
 
+*.mp4
+
 classifier/viz
 classifier/ssd.pytorch/eval/*.png
 classifier/ssd.pytorch/eval/*.jpg

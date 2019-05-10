@@ -44,7 +44,7 @@ class PeopleTracker(object):
 
         return predictions
 
-    def track(self):
+    def track(self, interpolate=True):
         for f_p in self.frame_paths:
             f_name = f_p.split('/')[-1].split('.png')[0]
             bbox_predictions = self.predictions[f_name]
@@ -54,6 +54,11 @@ class PeopleTracker(object):
             p for p in self.people_dict.values()
             if p.confirmed_real
         ]
+
+        self._make_bboxs_uniform(real_people)
+
+        if interpolate:
+            self._interpolate_bboxs(real_people)
 
         if self.export_as == 'viz':
             return self._export_as_viz(real_people)
@@ -153,12 +158,16 @@ class PeopleTracker(object):
             person_data['id'] = str(person.id)
             pos = []
             for p in person.prev_locations_bbox:
-                p_keys = ('frame_id', 'box')
-                p_vals = (p[-1], p[:-1])
-                pos.append(dict(zip(p_keys, p_vals)))
+                if p[0] > -1:
+                    p_keys = ('frame_id', 'box')
+                    scaled_coords = [coord * 3. for coord in p[:-1]]
+                    p_vals = (p[-1], scaled_coords)
+                    pos.append(dict(zip(p_keys, p_vals)))
             person_data['pos'] = pos
             data['people'].append(person_data)
-        return json.dumps(data)
+        with open('people_interpolated.json', 'w') as outfile:
+            json.dump(data, outfile)
+        return data
 
     def _export_as_viz(self, people):
         # [p_id, frame_id, xmin, ymin, xmax, ymax]
@@ -174,6 +183,99 @@ class PeopleTracker(object):
         # to 4k res
         data *= 3
         return data
+
+    def _make_bboxs_uniform(self, people):
+        for p in people:
+            uniform_locs_bbox = []
+            uniform_locs = []
+
+            bboxs = [b[:-1] for b in p.prev_locations_bbox]
+            _bboxs = np.asarray(bboxs, np.float32)
+            x_diffs = np.subtract(_bboxs[:, 2], _bboxs[:, 0])
+            avg_x = float(x_diffs.sum() / (x_diffs > 0).sum())
+            y_diffs = np.subtract(_bboxs[:, 3], _bboxs[:, 1])
+            avg_y = float(y_diffs.sum() / (y_diffs > 0).sum())
+
+            for i in range(len(p.prev_locations_bbox)):
+                cur_loc_x = p.prev_locations[i][0]
+                cur_loc_y = p.prev_locations[i][1]
+
+                if cur_loc_x > -1:
+                    u_bbox_xmin = int(cur_loc_x - (0.5 * avg_x))
+                    u_bbox_ymin = int(cur_loc_y - (0.5 * avg_y))
+                    u_bbox_xmax = int(cur_loc_x + (0.5 * avg_x))
+                    u_bbox_ymax = int(cur_loc_y + (0.5 * avg_y))
+
+                    uniform_locs_bbox.append([
+                        u_bbox_xmin, u_bbox_ymin, 
+                        u_bbox_xmax, u_bbox_ymax,
+                        p.prev_locations_bbox[i][-1]
+                    ])
+                    uniform_locs.append([cur_loc_x, cur_loc_y])
+
+            setattr(p, 'prev_locations_bbox', uniform_locs_bbox)
+            setattr(p, 'prev_locations', uniform_locs)
+
+
+    def _interpolate_bboxs(self, people, num_interp=10):
+        def _clip_x(x):
+            if x > 1277:
+                return 1277
+            elif x < 0:
+                return 0
+            else:
+                return x
+        def _clip_y(y):
+            if y > 719:
+                return 719
+            elif y < 0:
+                return 0
+            else:
+                return y
+
+        for p in people:
+            interp_locs = []
+            interp_bboxs = []
+
+            locs = p.prev_locations
+            bboxs = p.prev_locations_bbox
+            N = len(p.prev_locations)
+
+            for i in range(N):
+                # last loc, so nothing to interpolate
+                if i == (N - 1):
+                    continue
+                # no loc information, so nothing to interpolate 
+                if locs[i][0] == -1 or locs[i + 1][0] == -1:
+                    continue
+
+                cur_frame = int(bboxs[i][-1].split('_')[-1])
+                cur_loc = locs[i]
+                next_loc = locs[i + 1]
+                delta_x = (next_loc[0] - cur_loc[0]) / num_interp
+                delta_y = (next_loc[1] - cur_loc[1]) / num_interp
+
+                for j in range(num_interp):
+                    interp_frame = cur_frame + j
+                    interp_loc_x = cur_loc[0] + j * delta_x
+                    interp_loc_y = cur_loc[1] + j * delta_y
+                    interp_bbox_xmin = int(bboxs[i][0] + j * delta_x)
+                    interp_bbox_ymin = int(bboxs[i][1] + j * delta_y)
+                    interp_bbox_xmax = int(bboxs[i][2] + j * delta_x)
+                    interp_bbox_ymax = int(bboxs[i][3] + j * delta_y)
+
+                    interp_locs.append([
+                        _clip_x(interp_loc_x), _clip_y(interp_loc_y)
+                    ])
+                    interp_bboxs.append([
+                        _clip_x(interp_bbox_xmin), _clip_y(interp_bbox_ymin),
+                        _clip_x(interp_bbox_xmax), _clip_y(interp_bbox_ymax),
+                        interp_frame
+                    ])
+
+            setattr(p, 'prev_locations', interp_locs)
+            setattr(p, 'prev_locations_bbox', interp_bboxs)
+
 
 class Person(object):
     def __init__(self, _id, pred):
@@ -202,7 +304,8 @@ if __name__ == '__main__':
     MATCH_THRESH = 0.9
     MAX_MISSING = 5
     MIN_PRESENT = 4
-    viz = False
+    viz = True
+    EXPORT_AS = 'list'
 
     ###############################################################
 
@@ -210,25 +313,33 @@ if __name__ == '__main__':
     frame_paths_sorted = sorted(
         frame_paths, key=lambda p: int(p.split('/')[-1].split('_')[-1].split('.')[0]))
     predictions_path = os.path.join(frames_dir, 'combined.txt')
-    PT = PeopleTracker(frame_paths_sorted, predictions_path, export_as='viz')
+    PT = PeopleTracker(frame_paths_sorted, predictions_path, export_as=EXPORT_AS)
     people = PT.track()
 
     if viz:
         n = len(people)
+        def _to_file_num(num):
+            if isinstance(num, int):
+                num = str(num + 1)
+            else:
+                num = str(int(num.split('_')[-1]) + 1)
+            zeros_to_add = 4 - len(num)
+            return '0' * zeros_to_add + num
+
         with TqdmUpTo(unit='person', unit_scale=True, total=n, file=sys.stdout) as t:
             for idx, person in enumerate(people):
                 t.update_to(idx)
                 locations = person.prev_locations_bbox
                 for l in locations:
-                    img_path = os.path.join('viz', l[-1] + '.png')
+                    img_path = os.path.join('viz', _to_file_num(l[-1]) + '.png')
                     img = cv.imread(img_path)
                     cv.rectangle(
                         img, 
-                        (l[0], l[1]), (l[2], l[3]), 
-                        (255, 0, 0), 2)
-                    cv.putText(
-                        img, str(person.id), (l[0] - 5, l[1] - 5), 
-                        cv.FONT_HERSHEY_SIMPLEX, 
-                        fontScale=1, color=(0, 0, 255), thickness=2)
+                        (l[0] * 3, l[1] * 3), (l[2] * 3, l[3] * 3), 
+                        (0, 255, 0), 2)
+                    # cv.putText(
+                    #     img, str(person.id), (l[2] + 5, l[3] + 5), 
+                    #     cv.FONT_HERSHEY_SIMPLEX, 
+                    #     fontScale=1, color=(0, 0, 255), thickness=2)
                     cv.imwrite(img_path, img)
             t.update_to(n)
