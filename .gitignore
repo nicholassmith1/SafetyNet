@@ -7,4 +7,3 @@ classifier/viz
 classifier/ssd.pytorch/eval/*.png
 classifier/ssd.pytorch/eval/*.jpg
 
-mAP/input*
